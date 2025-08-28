@@ -1,16 +1,32 @@
 "use client";
 // Add Google Sign-In script
 declare global {
+  interface GoogleSignInResponse {
+    credential: string;
+    // add other properties if needed
+  }
   interface Window {
-    google: any;
-    handleGoogleSignIn: (response: any) => void;
+    google: {
+      accounts: {
+        id: {
+          initialize: (options: Record<string, unknown>) => void;
+          renderButton: (element: HTMLElement, options: Record<string, unknown>) => void;
+          prompt: (callback: (notification: GoogleSignInNotification) => void) => void;
+        };
+      };
+    };
+  handleGoogleSignIn: (response: GoogleSignInResponse) => void;
+  }
+  interface GoogleSignInNotification {
+    isNotDisplayed: () => boolean;
+    isSkippedMoment: () => boolean;
   }
 }
-import GoogleAuth from '../../components/GoogleAuth';
+// Removed unused import: GoogleAuth
 // Replace with your actual Google Client ID from Google Cloud Console
 const GOOGLE_CLIENT_ID = '601381853625-n8j65mvl61a3irt7pj3gd8pgauk5pdak.apps.googleusercontent.com';
 import React, { useState, useEffect } from 'react';
-import { Heart, Settings, Flame, Target, Star, Eye, EyeOff, X, Plus, Pause, Play, Square, Trash2 } from 'lucide-react';
+import { Heart, Settings, Star, Eye, EyeOff, X, Plus, Pause, Play, Trash2 } from 'lucide-react';
 
 import { supabase } from '../lib/supabase';
 
