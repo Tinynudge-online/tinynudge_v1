@@ -1,25 +1,9 @@
 "use client";
 // Add Google Sign-In script
 declare global {
-  interface GoogleSignInResponse {
-    credential: string;
-    // add other properties if needed
-  }
   interface Window {
-    google: {
-      accounts: {
-        id: {
-          initialize: (options: Record<string, unknown>) => void;
-          renderButton: (element: HTMLElement, options: Record<string, unknown>) => void;
-          prompt: (callback: (notification: GoogleSignInNotification) => void) => void;
-        };
-      };
-    };
-  handleGoogleSignIn: (response: GoogleSignInResponse) => void;
-  }
-  interface GoogleSignInNotification {
-    isNotDisplayed: () => boolean;
-    isSkippedMoment: () => boolean;
+    google: any;
+    handleGoogleSignIn: (response: any) => void;
   }
 }
 // Removed unused import: GoogleAuth
@@ -163,9 +147,10 @@ useEffect(() => {
 
 useEffect(() => {
   // Render the Google button after the DOM is ready and script is loaded
-  if (window.google && document.getElementById('google-signin-button')) {
+  const buttonEl = document.getElementById('google-signin-button');
+  if (window.google && buttonEl) {
     window.google.accounts.id.renderButton(
-      document.getElementById('google-signin-button'),
+      buttonEl,
       { 
         theme: 'outline', 
         size: 'large',
