@@ -46,9 +46,13 @@ interface Frequency {
 
 interface Activity {
   id: string;
+  connection_id: string;
   title: string;
   description: string;
-  completed: boolean;
+  status: 'active' | 'completed' | 'skipped' | 'paused';
+  created_at?: string;
+  completed_at?: string;
+  user_id: string;
 }
 // ...existing code...
 
@@ -92,8 +96,7 @@ useEffect(() => {
       picture: user.user_metadata?.picture || undefined
     });
     await loadUserConnections(user.id);
-    await loadCompletedActivities(user.id);
-    sessionStorage.setItem('hasVisited', 'true');
+        sessionStorage.setItem('hasVisited', 'true');
     
     if (selectedConnection && selectedFrequency) {
       const newConnection = {
@@ -178,8 +181,51 @@ useEffect(() => {
   const [isFirstTime, setIsFirstTime] = useState(true);
   const [userConnections, setUserConnections] = useState<Connection[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [completedActivities, setCompletedActivities] = useState<Set<string>>(new Set());
-
+  const [userActivities, setUserActivities] = useState<Activity[]>([]);
+const [activityTemplates] = useState<Record<string, string[]>>({
+  'Partner': [
+    'Send a heartfelt good morning text',
+    'Plan a surprise date night',
+    'Cook their favorite meal together',
+    'Write a love note and hide it somewhere they\'ll find',
+    'Give them a 5-minute shoulder massage'
+  ],
+  'Daughter': [
+    'Read a bedtime story together',
+    'Have a tea party or picnic',
+    'Draw pictures together',
+    'Go for a nature walk and collect leaves',
+    'Bake cookies together'
+  ],
+  'Son': [
+    'Play catch in the backyard',
+    'Build something together with blocks',
+    'Go on a bike ride',
+    'Teach him a new skill',
+    'Have a pillow fight'
+  ],
+  'Mom': [
+    'Call her just to say hi',
+    'Send flowers or a card',
+    'Cook her favorite meal',
+    'Look through old photos together',
+    'Ask about her childhood memories'
+  ],
+  'Dad': [
+    'Ask about his day at work',
+    'Watch his favorite sports team together',
+    'Work on a project together',
+    'Share a coffee or tea',
+    'Ask for his advice on something'
+  ],
+  'Friend': [
+    'Send a funny meme that reminds you of them',
+    'Plan a coffee date',
+    'Call them to catch up',
+    'Invite them to try something new together',
+    'Send an encouraging text'
+  ]
+});
   // Check if user is returning (using sessionStorage instead of localStorage)
   useEffect(() => {
     const hasVisited = sessionStorage.getItem('hasVisited');
@@ -187,7 +233,31 @@ useEffect(() => {
       setIsFirstTime(false);
     }
   }, []);
-
+// Sync activities when userActivities change
+useEffect(() => {
+  if (selectedActivityConnection && userActivities.length > 0) {
+    const connectionActivities = getActivitiesForConnection(selectedActivityConnection.id);
+    setActivities(connectionActivities);
+  }
+}, [userActivities, selectedActivityConnection]);
+useEffect(() => {
+  const checkAuth = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      setUser({ 
+        email: session.user.email || '', 
+        id: session.user.id,
+        name: session.user.user_metadata?.name,
+        picture: session.user.user_metadata?.picture
+      });
+      setUserName(session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User');
+      setCurrentPage('dashboard');
+      await loadUserConnections(session.user.id);
+      await loadUserActivities(session.user.id);
+    }
+  };
+  checkAuth();
+}, []);
   // Data
   const frequencies: Frequency[] = [
     {
@@ -250,63 +320,53 @@ useEffect(() => {
     { id: 'roommate', title: 'Roommate', emoji: '🏡', description: 'Create harmony at home' }
   ];
 
-  // Generate activities function
-const generateActivities = (connectionTitle: string): Activity[] => {
-  const allActivities: Record<string, string[]> = {
-      'Partner': [
-        'Send a heartfelt good morning text',
-        'Plan a surprise date night',
-        'Cook their favorite meal together',
-        'Write a love note and hide it somewhere they\'ll find',
-        'Give them a 5-minute shoulder massage'
-      ],
-      'Daughter': [
-        'Read a bedtime story together',
-        'Have a tea party or picnic',
-        'Draw pictures together',
-        'Go for a nature walk and collect leaves',
-        'Bake cookies together'
-      ],
-      'Son': [
-        'Play catch in the backyard',
-        'Build something together with blocks',
-        'Go on a bike ride',
-        'Teach him a new skill',
-        'Have a pillow fight'
-      ],
-      'Mom': [
-        'Call her just to say hi',
-        'Send flowers or a card',
-        'Cook her favorite meal',
-        'Look through old photos together',
-        'Ask about her childhood memories'
-      ],
-      'Dad': [
-        'Ask about his day at work',
-        'Watch his favorite sports team together',
-        'Work on a project together',
-        'Share a coffee or tea',
-        'Ask for his advice on something'
-      ],
-      'Friend': [
-        'Send a funny meme that reminds you of them',
-        'Plan a coffee date',
-        'Call them to catch up',
-        'Invite them to try something new together',
-        'Send an encouraging text'
-      ]
-    };
+// Create activities for a new connection
+const createActivitiesForConnection = async (connectionId: string, connectionTitle: string, userId: string) => {
+  const templates = activityTemplates[connectionTitle] || activityTemplates['Friend'];
+  const activitiesToCreate = templates.map((template, index) => ({
+    id: `${connectionId}-${index}`,
+    connection_id: connectionId,
+    title: template,
+    description: `A meaningful way to connect with your ${connectionTitle.toLowerCase()}`,
+    status: 'active' as const,
+    user_id: userId
+  }));
 
-  const connectionActivities = allActivities[connectionTitle] || allActivities['Friend'];
-  return connectionActivities.map((activity, index) => {
-    const activityId = `${connectionTitle}-${index}`;
-    return {
-      id: activityId,
-      title: activity,
-      description: `A meaningful way to connect with your ${connectionTitle.toLowerCase()}`,
-      completed: completedActivities.has(activityId)
-    };
-  });
+  try {
+    console.log('[DEBUG] Creating activities:', activitiesToCreate);
+    const { data, error } = await supabase
+      .from('user_activities')
+      .insert(activitiesToCreate);
+    console.log('[DEBUG] Supabase insert result:', { data, error });
+    if (error) {
+      console.error('Error creating activities:', error);
+    } else {
+      setUserActivities(prev => [...prev, ...activitiesToCreate]);
+    }
+  } catch (error) {
+    console.error('Error creating activities:', error);
+  }
+};
+
+// Load user activities from Supabase
+const loadUserActivities = async (userId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_activities')
+      .select('*')
+      .eq('user_id', userId);
+    
+    if (error) {
+      console.error('Error loading activities:', error);
+      return;
+    }
+    
+    if (Array.isArray(data)) {
+      setUserActivities(data);
+    }
+  } catch (error) {
+    console.error('Error loading activities:', error);
+  }
 };
 // Save user connections to Supabase
 const saveUserConnections = async (connections: Connection[], userId: string) => {
@@ -340,12 +400,10 @@ const loadUserConnections = async (userId: string) => {
       .from('user_connections')
       .select('*')
       .eq('user_id', userId);
-    
     if (error) {
       console.error('Error loading connections:', error);
       return;
     }
-    
     if (Array.isArray(data)) {
       const connections: Connection[] = data.map(row => ({
         id: row.connection_id,
@@ -358,55 +416,46 @@ const loadUserConnections = async (userId: string) => {
         isPaused: row.is_paused
       }));
       setUserConnections(connections);
-      // Regenerate activities for each connection after loading connections
-      setActivities(
-        connections.flatMap(conn => generateActivities(conn.title))
-      );
     }
   } catch (error) {
     console.error('Error loading connections:', error);
   }
 };
 
-// Save completed activity to Supabase
-const saveCompletedActivity = async (userId: string, activityId: string) => {
+// Update activity status in Supabase
+const updateActivityStatus = async (activityId: string, status: 'active' | 'completed' | 'skipped' | 'paused', userId: string) => {
   try {
-    const { error } = await supabase
-      .from('completed_activities')
-      .upsert([{ user_id: userId, activity_id: activityId }]);
-    if (error) console.error('Error saving completed activity:', error);
+    const updateData: any = { status };
+    if (status === 'completed') {
+      updateData.completed_at = new Date().toISOString();
+    }
+    console.log('[DEBUG] Updating activity:', activityId, 'with', updateData);
+    const { data, error } = await supabase
+      .from('user_activities')
+      .update(updateData)
+      .eq('id', activityId)
+      .eq('user_id', userId);
+    console.log('[DEBUG] Supabase update result:', { data, error });
+    if (error) {
+      console.error('Error updating activity status:', error);
+    } else {
+      // Update local state
+      setUserActivities(prev => 
+        prev.map(activity => 
+          activity.id === activityId 
+            ? { ...activity, status, ...(status === 'completed' ? { completed_at: updateData.completed_at } : {}) }
+            : activity
+        )
+      );
+    }
   } catch (error) {
-    console.error('Error saving completed activity:', error);
+    console.error('Error updating activity status:', error);
   }
 };
 
-// Load completed activities from Supabase
-const loadCompletedActivities = async (userId: string) => {
-  try {
-    console.log('[Supabase] Loading completed activities for userId:', userId);
-    const { data, error, status } = await supabase
-      .from('completed_activities')
-      .select('activity_id')
-      .eq('user_id', userId);
-    console.log('[Supabase] Query result:', { data, error, status });
-    if (error || status !== 200) {
-      console.error('Error loading completed activities:', error || `Status: ${status}`);
-      alert('Failed to load completed activities. Please check your Supabase table, RLS policies, and user ID.');
-      return;
-    }
-    if (Array.isArray(data)) {
-      setCompletedActivities(new Set(data.map((row: any) => row.activity_id)));
-      // Regenerate activities for each connection after loading completed activities
-      setActivities(
-        userConnections.flatMap(conn => generateActivities(conn.title))
-      );
-    } else {
-      console.warn('[Supabase] Data returned is not an array:', data);
-    }
-  } catch (error) {
-    console.error('Error loading completed activities:', error);
-    alert('Unexpected error loading completed activities.');
-  }
+// Get activities for a specific connection
+const getActivitiesForConnection = (connectionId: string) => {
+  return userActivities.filter(activity => activity.connection_id === connectionId);
 };
   // Handler functions
   const handleConnectionSelect = (connectionType: Connection) => {
@@ -443,56 +492,68 @@ const loadCompletedActivities = async (userId: string) => {
   };
   const updatedConnections = [...userConnections, newConnection];
   setUserConnections(updatedConnections);
-  // Save to Supabase if user is logged in
+  // Save to Supabase and create activities
   if (user?.id) {
     await saveUserConnections(updatedConnections, user.id);
+    await createActivitiesForConnection(newConnection.id, newConnection.title, user.id);
   }
   setShowAddConnectionModal(false);
 };
 const handleDeleteConnection = async (connectionId: string) => {
-  if (window.confirm('Are you sure you want to delete this connection?')) {
+  if (window.confirm('Are you sure you want to delete this connection and all its activities?')) {
     const updatedConnections = userConnections.filter(conn => conn.id !== connectionId);
     setUserConnections(updatedConnections);
-    // Delete from Supabase if user is logged in
+
+    // Remove activities for this connection
+    setUserActivities(prev => prev.filter(activity => activity.connection_id !== connectionId));
+
+    // Delete from Supabase
     if (user?.id) {
-      await supabase
-        .from('user_connections')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('connection_id', connectionId);
+      await supabase.from('user_connections').delete().eq('user_id', user.id).eq('connection_id', connectionId);
+      await supabase.from('user_activities').delete().eq('user_id', user.id).eq('connection_id', connectionId);
       await saveUserConnections(updatedConnections, user.id);
     }
   }
 };
-  const handleTogglePause = (connectionId: string) => {
-    setUserConnections(prev => 
-      prev.map(conn => 
-        conn.id === connectionId 
-          ? { ...conn, isPaused: !conn.isPaused }
-          : conn
-      )
-    );
-  };
-
-  const handleViewActivities = (connection: Connection) => {
-    setSelectedActivityConnection(connection);
-    setActivities(generateActivities(connection.title));
-    setShowActivitiesModal(true);
-  };
-
-  const handleCompleteActivity = (activityId: string) => {
-  setCompletedActivities(prev => new Set(prev).add(activityId));
-  setActivities(prev => 
-    prev.map(activity => 
-      activity.id === activityId 
-        ? { ...activity, completed: true }
-        : activity
+ const handleTogglePause = async (connectionId: string) => {
+  setUserConnections(prev => 
+    prev.map(conn => 
+      conn.id === connectionId 
+        ? { ...conn, isPaused: !conn.isPaused }
+        : conn
     )
   );
-  // Save to Supabase if user is logged in
-  if (user?.id) {
-    saveCompletedActivity(user.id, activityId);
+
+  // Update all activities for this connection to paused/active
+  const connection = userConnections.find(conn => conn.id === connectionId);
+  if (connection && user?.id) {
+    const newStatus = connection.isPaused ? 'active' : 'paused';
+    const connectionActivities = getActivitiesForConnection(connectionId);
+    
+    // Update all active activities for this connection
+    for (const activity of connectionActivities) {
+      if (activity.status === 'active' || activity.status === 'paused') {
+        await updateActivityStatus(activity.id, newStatus, user.id);
+      }
+    }
   }
+};
+
+const handleViewActivities = (connection: Connection) => {
+  setSelectedActivityConnection(connection);
+  
+  // Get stored activities for this connection
+  const connectionActivities = getActivitiesForConnection(connection.id);
+  setActivities(connectionActivities);
+  
+  setShowActivitiesModal(true);
+};
+
+  const handleCompleteActivity = async (activityId: string) => {
+  if (user?.id) {
+    await updateActivityStatus(activityId, 'completed', user.id);
+  }
+  
   // Update connection's completed activities count
   if (selectedActivityConnection) {
     setUserConnections(prev => {
@@ -505,59 +566,32 @@ const handleDeleteConnection = async (connectionId: string) => {
       return updated;
     });
   }
+
+  // Update the modal activities display
+  setActivities(prev => 
+    prev.map(activity => 
+      activity.id === activityId 
+        ? { ...activity, status: 'completed' }
+        : activity
+    )
+  );
 };
 
-  const handleSkipActivity = (activityId: string) => {
-    setActivities(prev => prev.filter(activity => activity.id !== activityId));
-  };
+  const handleSkipActivity = async (activityId: string) => {
+  if (user?.id) {
+    await updateActivityStatus(activityId, 'skipped', user.id);
+  }
 
-  const handleSignOut = () => {
-    setUser(null);
-    setUserName('');
-    setUserConnections([]);
-    sessionStorage.removeItem('hasVisited');
-    setCurrentPage('home');
-  };
-
-  // Real Google Sign-In handler
-// Define the callback function globally so Google can access it
-if (typeof window !== 'undefined') {
-  window.handleGoogleSignIn = (response: any) => {
-    try {
-      // Decode the JWT token to get user info
-      const userInfo = JSON.parse(atob(response.credential.split('.')[1]));
-      setCurrentPage('dashboard');
-      setUserName(userInfo.name || userInfo.email.split('@')[0]);
-      setUser({ 
-        email: userInfo.email, 
-        id: userInfo.sub,
-        name: userInfo.name,
-        picture: userInfo.picture
-      });
-      sessionStorage.setItem('hasVisited', 'true');
-      // If this is from connection selection, add that connection
-      if (selectedConnection && selectedFrequency) {
-        const newConnection: Connection = {
-          id: `${selectedConnection.title}-${Date.now()}`,
-          title: selectedConnection.title,
-          emoji: selectedConnection.emoji,
-          description: selectedConnection.description,
-          frequency: selectedFrequency.title,
-          activitiesCompleted: 0,
-          totalActivities: 5,
-          isPaused: false
-        };
-        setUserConnections([newConnection]);
-      }
-      setLoading(false);
-    } catch (error) {
-      console.error('Error processing Google Sign-In:', error);
-      alert('Error signing in with Google');
-      setLoading(false);
-    }
-  };
-}
-
+  // Update the modal activities display
+  setActivities(prev => 
+    prev.map(activity => 
+      activity.id === activityId 
+        ? { ...activity, status: 'skipped' }
+        : activity
+    )
+  );
+};
+  
 const handleGoogleSignIn = () => {
   if (!window.google) {
     alert('Google Sign-In is loading, please try again in a moment.');
@@ -610,7 +644,7 @@ const handleEmailSignIn = async () => {
     setCurrentPage('dashboard');
     setUser({ email, id: data.user.id }); // Use actual user ID from Supabase
     await loadUserConnections(data.user.id);
-    await loadCompletedActivities(data.user.id);
+    await loadUserActivities(data.user.id);
     setUserName(email.split('@')[0]);
     sessionStorage.setItem('hasVisited', 'true');
     
@@ -638,7 +672,31 @@ const handleEmailSignIn = async () => {
     setLoading(false);
   }
 };
-
+const handleSignOut = async () => {
+  try {
+    // Sign out from Supabase
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Error signing out:', error);
+    }
+  } catch (error) {
+    console.error('Error during sign out:', error);
+  } finally {
+    // Clear all state regardless of Supabase result
+    setUser(null);
+    setUserName('');
+    setUserConnections([]);
+    setUserActivities([]);
+    setActivities([]);
+    setSelectedConnection(null);
+    setSelectedActivityConnection(null);
+    setShowAddConnectionModal(false);
+    setShowActivitiesModal(false);
+    setShowFrequencyModal(false);
+    sessionStorage.removeItem('hasVisited');
+    setCurrentPage('home');
+  }
+};
 const handleEmailSignUp = async () => {
   setLoading(true);
   const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement | null;
@@ -859,14 +917,13 @@ const handleEmailSignUp = async () => {
   // Component: Activities Modal
   const ActivitiesModal = () => (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-  <div className="bg-white rounded-2xl p-4 sm:p-8 max-w-xs sm:max-w-2xl w-full shadow-2xl relative max-h-[80vh] overflow-y-auto" style={{ minWidth: '320px' }}>
+      <div className="bg-white rounded-2xl p-4 sm:p-8 max-w-xs sm:max-w-2xl w-full shadow-2xl relative max-h-[80vh] overflow-y-auto" style={{ minWidth: '320px' }}>
         <button
           onClick={() => setShowActivitiesModal(false)}
           className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
         >
           <X className="w-6 h-6" />
         </button>
-
         <div className="text-center mb-4 sm:mb-8">
           <div className="text-3xl sm:text-4xl mb-2 sm:mb-3">{selectedActivityConnection?.emoji}</div>
           <h3 className="text-lg sm:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">
@@ -876,14 +933,17 @@ const handleEmailSignUp = async () => {
             Choose activities to strengthen your connection
           </p>
         </div>
-
-  <div className="space-y-3 sm:space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           {activities.map((activity) => (
             <div 
               key={activity.id}
               className={`p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 transition-all duration-200 text-sm sm:text-base ${
-                activity.completed 
+                activity.status === 'completed' 
                   ? 'bg-green-50 border-green-200' 
+                  : activity.status === 'skipped'
+                  ? 'bg-gray-100 border-gray-300 opacity-60'
+                  : activity.status === 'paused'
+                  ? 'bg-yellow-50 border-yellow-200'
                   : 'bg-gray-50 border-gray-200'
               }`}
             >
@@ -896,13 +956,23 @@ const handleEmailSignUp = async () => {
                     {activity.description}
                   </p>
                 </div>
-                {activity.completed && (
+                {activity.status === 'completed' && (
                   <div className="text-green-500 ml-4">
                     <Star className="w-6 h-6 fill-current" />
                   </div>
                 )}
+                {activity.status === 'skipped' && (
+                  <div className="text-gray-500 ml-4">
+                    <span className="text-sm font-medium">Skipped</span>
+                  </div>
+                )}
+                {activity.status === 'paused' && (
+                  <div className="text-yellow-500 ml-4">
+                    <Pause className="w-5 h-5" />
+                  </div>
+                )}
               </div>
-              {!activity.completed && (
+              {activity.status === 'active' && (
                 <div className="flex gap-3">
                   <button
                     onClick={() => handleCompleteActivity(activity.id)}
@@ -918,23 +988,39 @@ const handleEmailSignUp = async () => {
                   </button>
                 </div>
               )}
+              {activity.status === 'skipped' && (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => updateActivityStatus(activity.id, 'active', user?.id || '')}
+                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-xl transition-colors"
+                  >
+                    Undo Skip
+                  </button>
+                </div>
+              )}
+              {activity.status === 'paused' && (
+                <div className="text-center text-gray-500 py-2">
+                  <span className="text-sm">Activity is paused</span>
+                </div>
+              )}
             </div>
           ))}
+          {activities.length === 0 && (
+            <div className="text-center py-8">
+              <p className="text-gray-500 mb-4">All activities completed! 🎉</p>
+              <button
+                onClick={() => {
+                  if (selectedActivityConnection && user?.id) {
+                    createActivitiesForConnection(selectedActivityConnection.id, selectedActivityConnection.title, user.id);
+                  }
+                }}
+                className="bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-6 rounded-xl transition-colors"
+              >
+                Get More Activities
+              </button>
+            </div>
+          )}
         </div>
-
-        {activities.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-gray-500 mb-4">All activities completed! 🎉</p>
-            <button
-              onClick={() => {
-                setActivities(generateActivities(selectedActivityConnection?.title || ''));
-              }}
-              className="bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-6 rounded-xl transition-colors"
-            >
-              Get More Activities
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1017,13 +1103,13 @@ const handleEmailSignUp = async () => {
       <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
     </svg>
     {loading ? 'Loading...' : 'Continue with Google 🚀'}
+           <button
+  onClick={handleEmailSignUp}
+  disabled={loading}
+  className="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+>
+  {loading ? 'Loading...' : 'Create Account 🚀'}
   </button>
-</div>
-
-            <div className="flex items-center gap-4 mb-6">
-              <div className="flex-1 h-px bg-gray-300"></div>
-              <span className="text-gray-500 text-sm">or continue with email</span>
-              <div className="flex-1 h-px bg-gray-300"></div>
             </div>
 
             <div className="space-y-4">
@@ -1079,7 +1165,7 @@ const handleEmailSignUp = async () => {
               </div>
 
            <button
-  onClick={handleEmailSignIn}
+  onClick={handleEmailSignInUp}
   disabled={loading}
   className="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50"
 >
@@ -1153,9 +1239,10 @@ const handleEmailSignUp = async () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {userConnections.map((connection) => {
-                    const completionPercentage = connection.totalActivities 
-                      ? Math.round(((connection.activitiesCompleted || 0) / connection.totalActivities) * 100)
-                      : 0;
+                    const connectionActivities = getActivitiesForConnection(connection.id);
+const completedCount = connectionActivities.filter(activity => activity.status === 'completed').length;
+const totalCount = connectionActivities.length;
+const completionPercentage = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
                     
                     return (
                       <div 
@@ -1189,8 +1276,8 @@ const handleEmailSignUp = async () => {
                             ></div>
                           </div>
                           <div className="text-xs text-gray-500 mt-1">
-                            {connection.activitiesCompleted || 0} of {connection.totalActivities} activities completed
-                          </div>
+  {completedCount} of {totalCount} activities completed
+</div>
                         </div>
 
                         <div className="space-y-3">
