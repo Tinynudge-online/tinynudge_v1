@@ -1,4 +1,10 @@
 "use client";
+import { 
+  updateActivityStatus, 
+  getActivitiesForConnection, 
+  loadUserConnections, 
+  loadUserActivities 
+} from '../lib/activities';
 // Add Google Sign-In script
 declare global {
   interface Window {
@@ -68,7 +74,7 @@ useEffect(() => {
   script.onload = () => {
   console.log('[Google Sign-In] Script loaded');
   if (window.google && window.google.accounts) {
-     window.handleGoogleSignIn = async (response: any) => {
+ window.handleGoogleSignIn = async (response: any) => {
   try {
     console.log('[Google Sign-In] Callback fired', response);
     
@@ -80,7 +86,7 @@ useEffect(() => {
 
     if (error) {
       console.error('[Google Sign-In] Supabase error:', error);
-    alert(`Error signing in with Google: ${(error as Error)?.message || 'Unknown error'}`);
+      alert(`Error signing in with Google: ${(error as Error)?.message || 'Unknown error'}`);
       setLoading(false);
       return;
     }
@@ -95,12 +101,17 @@ useEffect(() => {
       name: user.user_metadata?.name || undefined,
       picture: user.user_metadata?.picture || undefined
     });
-    await loadUserConnections(user.id);
-        sessionStorage.setItem('hasVisited', 'true');
     
- if (selectedConnection && selectedFrequency) {
-  await handleAddConnection(selectedConnection);
-}
+    // Load user connections and activities
+    await loadUserConnections(user.id);
+    await loadUserActivities(user.id);
+    
+    sessionStorage.setItem('hasVisited', 'true');
+    
+    // If this is first sign-up from connection selection, add that connection
+    if (selectedConnection && selectedFrequency) {
+      await handleAddConnection(selectedConnection);
+    }
     
     alert('Welcome to TinyNudge!');
     setLoading(false);
@@ -167,7 +178,8 @@ useEffect(() => {
   const [userConnections, setUserConnections] = useState<Connection[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [userActivities, setUserActivities] = useState<Activity[]>([]);
-const [activityTemplates] = useState<Record<string, string[]>>({
+  const [lastActivitiesLoad, setLastActivitiesLoad] = useState<string | null>(null);
+  const [activityTemplates] = useState<Record<string, string[]>>({
   'Partner': [
     'Send a heartfelt good morning text',
     'Plan a surprise date night',
@@ -273,6 +285,7 @@ const [activityTemplates] = useState<Record<string, string[]>>({
     'Talk about your day',
     'Plan a fun outing'
   ]
+  
 });
   // Check if user is returning (using sessionStorage instead of localStorage)
   useEffect(() => {
@@ -284,7 +297,7 @@ const [activityTemplates] = useState<Record<string, string[]>>({
 // Sync activities when userActivities change
 useEffect(() => {
   if (selectedActivityConnection && userActivities.length > 0) {
-    const connectionActivities = getActivitiesForConnection(selectedActivityConnection.id);
+    const connectionActivities = getActivitiesForConnection(userActivities, selectedActivityConnection.id);
     setActivities(connectionActivities);
   }
 }, [userActivities, selectedActivityConnection]);
@@ -306,6 +319,37 @@ useEffect(() => {
   };
   checkAuth();
 }, []);
+useEffect(() => {
+  const syncActivities = async () => {
+    if (selectedActivityConnection && user?.id) {
+      const loadedActivities = await loadUserActivities(user.id);
+      const connectionActivities = loadedActivities.filter(
+        (activity: Activity) => activity.connection_id === selectedActivityConnection.id
+      );
+      setActivities(connectionActivities);
+    }
+  };
+
+  syncActivities();
+}, [selectedActivityConnection, userActivities, user?.id]);
+// STEP 7: Debug logging - ADD THIS RIGHT AFTER STEP 5
+useEffect(() => {
+  console.log('User activities updated:', userActivities.length);
+  console.log('User connections updated:', userConnections.length);
+  
+  // Optional: Log more details for debugging
+  if (userActivities.length > 0) {
+    console.log('Sample activity:', userActivities[0]);
+  }
+  if (userConnections.length > 0) {
+    console.log('Sample connection:', userConnections[0]);
+  }
+}, [userActivities, userConnections]);
+// ...handler functions start here...
+const handleConnectionSelect = (connectionType: Connection) => {
+  setSelectedConnection(connectionType);
+  setShowFrequencyModal(true);
+};
   // Data
   const frequencies: Frequency[] = [
     {
@@ -371,61 +415,55 @@ useEffect(() => {
 // Create activities for a new connection
 const createActivitiesForConnection = async (connectionId: string, connectionTitle: string, userId: string) => {
   const templates = activityTemplates[connectionTitle] || activityTemplates['Friend'];
+  
+  console.log('Creating activities for connection ID:', connectionId);
+  console.log('User ID:', userId);
+  
   const activitiesToCreate = templates.map((template) => ({
-    connection_id: connectionId,
+    connection_id: connectionId, // This should now be the correct database ID
     title: template,
-    description: template,
-    status: 'active' as const,
+    description: `A meaningful way to connect with your ${connectionTitle.toLowerCase()}`,
+    status: 'active',
     user_id: userId,
     created_at: new Date().toISOString()
   }));
 
   try {
-    console.log('[DEBUG] Creating activities for connection:', connectionId);
+    console.log('Activities to create:', activitiesToCreate);
+    
     const { data, error } = await supabase
       .from('user_activities')
       .insert(activitiesToCreate)
       .select();
 
     if (error) {
-      console.error('Error creating activities:', error);
+      console.error('Supabase error details:', error);
       throw error;
     }
 
     if (data && Array.isArray(data)) {
-      setUserActivities(prev => [...prev, ...data]);
-      console.log('Created activities:', data);
+      const normalized = data.map((row: any) => ({
+        id: row.id.toString(),
+        connection_id: row.connection_id.toString(),
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        created_at: row.created_at,
+        completed_at: row.completed_at ?? undefined,
+        user_id: row.user_id
+      }));
+
+      const updatedActivities = await loadUserActivities(userId);
+if (Array.isArray(updatedActivities)) {
+  setUserActivities(updatedActivities);
+}
+      console.log('Successfully created activities:', normalized);
     }
   } catch (error) {
     console.error('Error creating activities:', error);
     throw error;
   }
 };
-// Load user activities from Supabase
-const loadUserActivities = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('user_activities')
-      .select('*')
-      .eq('user_id', userId);
-    
-    if (error) {
-      console.error('Error loading activities:', error);
-      return;
-    }
-    
-    if (Array.isArray(data)) {
-      setUserActivities(data);
-      console.log('Loaded activities:', data);
-    }
-  } catch (error) {
-    console.error('Error loading activities:', error);
-  }
-};
-
-// Save user connections to Supabase
-// This function is no longer needed since we store connections directly
-// Keep for backward compatibility but make it a no-op
 const saveUserConnections = async (connections: Connection[], userId: string) => {
   // No longer needed - connections are saved directly to connections table
   console.log('saveUserConnections called but not needed');
@@ -461,64 +499,8 @@ const loadUserConnections = async (userId: string) => {
     console.error('Error loading connections:', error);
   }
 };
-// Update activity status in Supabase
-// PART 3: Improve the updateActivityStatus function
-// Replace the existing updateActivityStatus function (around line 210) with this enhanced version:
-
-const updateActivityStatus = async (activityId: string, status: 'active' | 'completed' | 'skipped' | 'paused', userId: string) => {
-  try {
-    const updateData: any = { status };
-    
-    // Set completed_at only when completing an activity
-    if (status === 'completed') {
-      updateData.completed_at = new Date().toISOString();
-    } else if (status === 'active' || status === 'skipped' || status === 'paused') {
-      // Clear completed_at for non-completed statuses
-      updateData.completed_at = null;
-    }
-
-    console.log(`Updating activity ${activityId} to status: ${status}`);
-
-    const { data, error } = await supabase
-      .from('user_activities')
-      .update(updateData)
-      .eq('id', activityId)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error updating activity status:', error);
-      throw error;
-    }
-
-    // Update local state immediately
-    setUserActivities(prev => 
-      prev.map(activity => 
-        activity.id === activityId 
-          ? { ...activity, status, ...(updateData.completed_at !== undefined ? { completed_at: updateData.completed_at } : {}) }
-          : activity
-      )
-    );
-
-    console.log('Successfully updated activity status:', data);
-    return data;
-
-  } catch (error) {
-    console.error('Error updating activity status:', error);
-    throw error;
-  }
-};
-
-// Get activities for a specific connection
-const getActivitiesForConnection = (connectionId: string) => {
-  return userActivities.filter(activity => activity.connection_id === connectionId);
-};
-  // Handler functions
-  const handleConnectionSelect = (connectionType: Connection) => {
-    setSelectedConnection(connectionType);
-    setShowFrequencyModal(true);
-  };
+   // Handler functions
+  // Removed duplicate handleConnectionSelect
 
   const handleFrequencySelect = (frequency: Frequency) => {
     setSelectedFrequency(frequency);
@@ -529,9 +511,6 @@ const getActivitiesForConnection = (connectionId: string) => {
       setCurrentPage('signin');
     }, 3000);
   };
-
-  // PART 2: Fix the handleAddConnection function
-// Replace the existing handleAddConnection function (around line 236) with this corrected version:
 
 const handleAddConnection = async (connectionType: Connection) => {
   // Prevent duplicate connections by title
@@ -549,7 +528,6 @@ const handleAddConnection = async (connectionType: Connection) => {
       .from('user_connections')
       .insert([{
         user_id: user.id,
-        connection_id: connectionType.id, // This stores "partner", "mom", etc.
         title: connectionType.title,
         emoji: connectionType.emoji,
         description: connectionType.description,
@@ -568,37 +546,42 @@ const handleAddConnection = async (connectionType: Connection) => {
       return;
     }
 
-    // Create UI connection object using INTEGER id from database
+    console.log('Created connection record:', connectionRecord);
+
+    // Build a local representation of the newly created connection
     const newConnection: Connection = {
-      id: connectionRecord.id.toString(), // Convert integer to string for consistency
-      title: connectionType.title,
-      emoji: connectionType.emoji,
-      description: connectionType.description,
-      frequency: selectedFrequency?.title || 'Weekly',
-      activitiesCompleted: 0,
-      totalActivities: 5,
-      isPaused: false
+      id: connectionRecord.id.toString(), // This is the correct database ID
+      title: connectionRecord.title,
+      emoji: connectionRecord.emoji,
+      description: connectionRecord.description,
+      frequency: connectionRecord.frequency || (selectedFrequency?.title || 'Weekly'),
+      activitiesCompleted: connectionRecord.activities_completed || 0,
+      totalActivities: connectionRecord.total_activities || 5,
+      isPaused: connectionRecord.is_paused || false
     };
 
-    // Update local state first
+    // Update local state immediately
     setUserConnections(prev => [...prev, newConnection]);
 
-    // Create activities using the database ID (converted to string)
+    // FIX: Use the database ID (connectionRecord.id) not the type ID
     await createActivitiesForConnection(connectionRecord.id.toString(), connectionType.title, user.id);
+// Reload activities to ensure state consistency
+const updatedActivities = await loadUserActivities(user.id);
+if (Array.isArray(updatedActivities)) {
+  setUserActivities(updatedActivities);
+}
     
+    // Reload activities to ensure state is consistent  
+    await loadUserActivities(user.id);
+
     setShowAddConnectionModal(false);
     alert('Connection added successfully!');
-
-    // Clear selection states
-    setSelectedConnection(null);
-    setSelectedFrequency(null);
 
   } catch (error) {
     console.error('Error in handleAddConnection:', error);
     alert('Error adding connection');
   }
 };
-
 const handleDeleteConnection = async (connectionId: string) => {
   if (!window.confirm('Are you sure you want to delete this connection and all its activities?')) {
     return;
@@ -616,124 +599,129 @@ const handleDeleteConnection = async (connectionId: string) => {
       console.error('Error deleting activities:', activitiesError);
     }
 
-    // Delete connection
-    const { error: connectionError } = await supabase
-      .from('user_connections')
-      .delete()
-      .eq('id', connectionId)
-      .eq('user_id', user?.id);
+        // Delete connection
+        const { error: connectionError } = await supabase
+          .from('user_connections')
+          .delete()
+          .eq('id', connectionId)
+          .eq('user_id', user?.id);
 
-    if (connectionError) {
-      console.error('Error deleting connection:', connectionError);
-      alert('Error deleting connection');
-      return;
-    }
- // PART 1: Add the missing handleTogglePause function
-// Add this function after line 324 (after handleDeleteConnection)
+        if (connectionError) {
+          console.error('Error deleting connection:', connectionError);
+          alert('Error deleting connection');
+          return;
+        }
 
-const handleTogglePause = async (connectionId: string) => {
-  const connection = userConnections.find(conn => conn.id === connectionId);
-  if (!connection || !user?.id) return;
+        // Update local state
+        setUserConnections(prev => prev.filter(conn => conn.id !== connectionId));
+        setUserActivities(prev => prev.filter(activity => activity.connection_id !== connectionId));
 
-  const newPauseStatus = !connection.isPaused;
-
-  try {
-    // Update connection pause status in database
-    const { error: connectionError } = await supabase
-      .from('user_connections')
-      .update({ is_paused: newPauseStatus })
-      .eq('id', connectionId)
-      .eq('user_id', user.id);
-
-    if (connectionError) {
-      console.error('Error updating connection pause status:', connectionError);
-      alert('Error updating connection status');
-      return;
-    }
-
-    // Update local state
-    setUserConnections(prev => 
-      prev.map(conn => 
-        conn.id === connectionId 
-          ? { ...conn, isPaused: newPauseStatus }
-          : conn
-      )
-    );
-
-    // Update all active activities for this connection
-    const connectionActivities = getActivitiesForConnection(connectionId);
-    const newActivityStatus = newPauseStatus ? 'paused' : 'active';
-    
-    // Only update activities that are currently 'active' or 'paused'
-    const activitiesToUpdate = connectionActivities.filter(activity => 
-      activity.status === 'active' || activity.status === 'paused'
-    );
-
-    for (const activity of activitiesToUpdate) {
-      await updateActivityStatus(activity.id, newActivityStatus, user.id);
-    }
-
-    console.log(`Connection ${connectionId} ${newPauseStatus ? 'paused' : 'resumed'}`);
-
-  } catch (error) {
-    console.error('Error in handleTogglePause:', error);
-    alert('Error updating connection status');
-  }
-};
-    // Update local state
-    setUserConnections(prev => prev.filter(conn => conn.id !== connectionId));
-    setUserActivities(prev => prev.filter(activity => activity.connection_id !== connectionId));
-
-    alert('Connection deleted successfully');
-  } catch (error) {
-    console.error('Error in handleDeleteConnection:', error);
-  }
-};
-
-  // Update all activities for this connection to paused/active
-  const connection = userConnections.find(conn => conn.id === connectionId);
-  if (connection && user?.id) {
-    const newStatus = connection.isPaused ? 'active' : 'paused';
-    const connectionActivities = getActivitiesForConnection(connectionId);
-    
-    // Update all active activities for this connection
-    for (const activity of connectionActivities) {
-      if (activity.status === 'active' || activity.status === 'paused') {
-        await updateActivityStatus(activity.id, newStatus, user.id);
+        alert('Connection deleted successfully');
+      } catch (error) {
+        console.error('Error in handleDeleteConnection:', error);
       }
+    };
+
+    // Handle pausing/resuming a connection and update related activities
+    const handleTogglePause = async (connectionId: string) => {
+      const connection = userConnections.find(conn => conn.id === connectionId);
+      if (!connection || !user?.id) return;
+
+      const newPauseStatus = !connection.isPaused;
+
+      try {
+        // Update connection pause status in database
+        const { error: connectionError } = await supabase
+          .from('user_connections')
+          .update({ is_paused: newPauseStatus })
+          .eq('id', connectionId)
+          .eq('user_id', user.id);
+
+        if (connectionError) {
+          console.error('Error updating connection pause status:', connectionError);
+          alert('Error updating connection status');
+          return;
+        }
+
+        // Update local state
+        setUserConnections(prev => 
+          prev.map(conn => 
+            conn.id === connectionId 
+              ? { ...conn, isPaused: newPauseStatus }
+              : conn
+          )
+        );
+
+  // Update all active/paused activities for this connection
+  const connectionActivities = getActivitiesForConnection(userActivities, connectionId);
+  const newActivityStatus = newPauseStatus ? 'paused' : 'active';
+
+        for (const activity of connectionActivities) {
+          if (activity.status === 'active' || activity.status === 'paused') {
+            await updateActivityStatus(activity.id, newActivityStatus, user.id);
+          }
+        }
+
+        console.log(`Connection ${connectionId} ${newPauseStatus ? 'paused' : 'resumed'}`);
+
+      } catch (error) {
+        console.error('Error in handleTogglePause:', error);
+        alert('Error updating connection status');
+      }
+    };
+
+// REPLACE entire function with:
+const handleViewActivities = async (connection: Connection) => {
+  setSelectedActivityConnection(connection);
+
+  if (user?.id) {
+    const updatedActivities = await loadUserActivities(user.id);
+    if (Array.isArray(updatedActivities)) {
+      setUserActivities(updatedActivities);
+      
+      const connectionActivities = updatedActivities.filter(
+        activity => activity.connection_id === connection.id
+      );
+      
+      console.log('Viewing activities for connection:', connection.id, 'found:', connectionActivities.length);
+      setActivities(connectionActivities);
     }
   }
-};
-
-const handleViewActivities = (connection: Connection) => {
-  setSelectedActivityConnection(connection);
-  
-  // Get stored activities for this connection
-  const connectionActivities = getActivitiesForConnection(connection.id);
-  setActivities(connectionActivities);
   
   setShowActivitiesModal(true);
 };
-
-  const handleCompleteActivity = async (activityId: string) => {
+  // REPLACE entire function with:
+const handleCompleteActivity = async (activityId: string) => {
   if (!user?.id) return;
 
   try {
     await updateActivityStatus(activityId, 'completed', user.id);
     
-    // Update connection progress in database
-    if (selectedActivityConnection) {
-      const connectionActivities = getActivitiesForConnection(selectedActivityConnection.id);
-      const completedCount = connectionActivities.filter(a => a.status === 'completed').length + 1;
+    // Reload activities to ensure consistency
+    const updatedActivities = await loadUserActivities(user.id);
+    if (Array.isArray(updatedActivities)) {
+      setUserActivities(updatedActivities);
       
-      // Update user_connections table
+      // Update the modal display
+      if (selectedActivityConnection) {
+        const connectionActivities = updatedActivities.filter(
+          activity => activity.connection_id === selectedActivityConnection.id
+        );
+        setActivities(connectionActivities);
+      }
+    }
+    
+    // Update connection progress
+    if (selectedActivityConnection) {
+      const connectionActivities = getActivitiesForConnection(updatedActivities, selectedActivityConnection.id);
+      const completedCount = connectionActivities.filter(a => a.status === 'completed').length;
+      
       await supabase
         .from('user_connections')
         .update({ activities_completed: completedCount })
         .eq('id', selectedActivityConnection.id)
         .eq('user_id', user.id);
 
-      // Update local state
       setUserConnections(prev => 
         prev.map(conn => 
           conn.id === selectedActivityConnection.id 
@@ -743,50 +731,38 @@ const handleViewActivities = (connection: Connection) => {
       );
     }
 
-    // Update modal display
-    setActivities(prev => 
-      prev.map(activity => 
-        activity.id === activityId 
-          ? { ...activity, status: 'completed' }
-          : activity
-      )
-    );
-
   } catch (error) {
     console.error('Error completing activity:', error);
     alert('Error completing activity');
   }
 };
  // PART 4: Fix the handleSkipActivity function
-// Replace the existing handleSkipActivity function (around line 390) with this corrected version:
-
+// REPLACE entire function with:
 const handleSkipActivity = async (activityId: string) => {
-  if (!user?.id) {
-    console.error('No user ID available for skipping activity');
-    return;
-  }
+  if (!user?.id) return;
 
   try {
-    // Update activity status in database first
     await updateActivityStatus(activityId, 'skipped', user.id);
-
-    // Update the modal activities display only after successful database update
-    setActivities(prev => 
-      prev.map(activity => 
-        activity.id === activityId 
-          ? { ...activity, status: 'skipped', completed_at: null }
-          : activity
-      )
-    );
-
-    console.log(`Activity ${activityId} skipped successfully`);
+    
+    // Reload activities to ensure consistency
+    const updatedActivities = await loadUserActivities(user.id);
+    if (Array.isArray(updatedActivities)) {
+      setUserActivities(updatedActivities);
+      
+      // Update the modal display
+      if (selectedActivityConnection) {
+        const connectionActivities = updatedActivities.filter(
+          activity => activity.connection_id === selectedActivityConnection.id
+        );
+        setActivities(connectionActivities);
+      }
+    }
 
   } catch (error) {
     console.error('Error skipping activity:', error);
-    alert('Error skipping activity. Please try again.');
+    alert('Error skipping activity');
   }
 };
-
 // ALSO ADD: Function to undo skip activity
 const handleUndoSkipActivity = async (activityId: string) => {
   if (!user?.id) {
@@ -807,7 +783,7 @@ const handleUndoSkipActivity = async (activityId: string) => {
     setActivities(prev => 
       prev.map(act => 
         act.id === activityId 
-          ? { ...act, status: newStatus, completed_at: null }
+          ? { ...act, status: newStatus, completed_at: undefined }
           : act
       )
     );
@@ -1156,6 +1132,33 @@ const handleEmailSignInUp = async () => {
 const ActivitiesModal = () => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
     <div className="bg-white rounded-2xl p-4 sm:p-8 max-w-xs sm:max-w-2xl w-full shadow-2xl relative max-h-[80vh] overflow-y-auto" style={{ minWidth: '320px' }}>
+      {/* DEBUG INFO - You can remove this later */}
+      <div className="absolute top-2 left-2 text-xs text-gray-400">
+        Connection ID: {selectedActivityConnection?.id} | 
+        Activities: {activities.length}
+      </div>
+      {/* Debug controls */}
+      <div className="absolute top-2 right-2 text-xs text-gray-400 flex items-center gap-2">
+        <button
+          onClick={async () => {
+            if (user?.id) {
+              const loaded = await loadUserActivities(user.id);
+              setActivities(Array.isArray(loaded) ? loaded.filter(a => a.connection_id === selectedActivityConnection?.id) : []);
+              setLastActivitiesLoad(new Date().toISOString());
+            }
+          }}
+          className="bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-xs"
+        >
+          Reload
+        </button>
+        <div className="text-xs text-gray-400">Updated: {lastActivitiesLoad || 'never'}</div>
+      </div>
+
+      {/* Raw activities JSON for quick debugging */}
+      <div className="absolute left-1/2 transform -translate-x-1/2 bottom-2 text-xs text-gray-500 bg-white/70 rounded px-2 py-1 max-w-full overflow-x-auto">
+        <pre className="whitespace-pre-wrap max-w-[90vw] max-h-24 overflow-auto text-[10px] leading-4">{JSON.stringify(activities, null, 2)}</pre>
+      </div>
+      
       <button
         onClick={() => setShowActivitiesModal(false)}
         className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
@@ -1386,6 +1389,13 @@ const ActivitiesModal = () => (
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
                   Confirm Password 🔒
+                  <button
+  onClick={handleEmailSignUp}
+  disabled={loading}
+  className="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50"
+>
+  {loading ? 'Loading...' : 'Create Account 🚀'}
+</button>
                 </label>
                 <div className="relative">
                   <input
@@ -1472,7 +1482,7 @@ const ActivitiesModal = () => (
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {userConnections.map((connection) => {
-                    const connectionActivities = getActivitiesForConnection(connection.id);
+                    const connectionActivities = getActivitiesForConnection(userActivities, connection.id);
 const completedCount = connectionActivities.filter(activity => activity.status === 'completed').length;
 const totalCount = connectionActivities.length;
 const completionPercentage = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
