@@ -1,32 +1,54 @@
 "use client";
-import { 
-  updateActivityStatus, 
-  getActivitiesForConnection, 
-  loadUserConnections, 
-  loadUserActivities 
-} from '../lib/activities';
-// Add Google Sign-In script
+
+// ============================================================================
+// PART 1: IMPORTS, INTERFACES, AND SUPABASE SETUP
+// ============================================================================
+
+import React, { useState, useEffect } from 'react';
+import { Heart, Settings, Star, Eye, EyeOff, X, Plus, Pause, Play, Trash2 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+
+// ============================================================================
+// GLOBAL DECLARATIONS
+// ============================================================================
+
 declare global {
   interface Window {
     google: any;
     handleGoogleSignIn: (response: any) => void;
   }
 }
-// Removed unused import: GoogleAuth
-// Replace with your actual Google Client ID from Google Cloud Console
-const GOOGLE_CLIENT_ID = '601381853625-n8j65mvl61a3irt7pj3gd8pgauk5pdak.apps.googleusercontent.com';
-import React, { useState, useEffect } from 'react';
-import { Heart, Settings, Star, Eye, EyeOff, X, Plus, Pause, Play, Trash2 } from 'lucide-react';
 
-import { supabase } from '../lib/supabase';
+// ============================================================================
+// SUPABASE CLIENT INITIALIZATION
+// ============================================================================
 
-// Proper TypeScript interfaces
+const supabaseUrl = 'https://uaqbwsmuuvaukxurzdks.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcWJ3c211dXZhdWt4dXJ6ZGtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUwNTI4NzEsImV4cCI6MjA3MDYyODg3MX0.V__PztLOgmJO40UE7Nf3OcQRYojURZsKvpH-hp-XurU';
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    detectSessionInUrl: true,
+    autoRefreshToken: true
+  },
+  db: {
+    schema: 'public'
+  }
+});
+
+// ============================================================================
+// TYPESCRIPT INTERFACES
+// ============================================================================
+
 interface User {
   email: string;
   id: string;
   name?: string;
   picture?: string;
 }
+
+export default function HomePage() {
 
 interface Connection {
   id: string;
@@ -57,129 +79,21 @@ interface Activity {
   description: string;
   status: 'active' | 'completed' | 'skipped' | 'paused';
   created_at?: string;
-  completed_at?: string;
+  completed_at?: string | null;
   user_id: string;
 }
-// ...existing code...
 
-export default function Page() {
-// Load Google Sign-In script
-useEffect(() => {
-  const script = document.createElement('script');
-  script.src = 'https://accounts.google.com/gsi/client';
-  script.async = true;
-  script.defer = true;
-  document.head.appendChild(script);
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
-  script.onload = () => {
-  console.log('[Google Sign-In] Script loaded');
-  if (window.google && window.google.accounts) {
- window.handleGoogleSignIn = async (response: any) => {
-  try {
-    console.log('[Google Sign-In] Callback fired', response);
-    
-    // Sign in with Supabase using the Google ID token
-    const { data, error } = await supabase.auth.signInWithIdToken({
-      provider: 'google',
-      token: response.credential,
-    });
+const GOOGLE_CLIENT_ID = '601381853625-n8j65mvl61a3irt7pj3gd8pgauk5pdak.apps.googleusercontent.com';
+// ============================================================================
+// PART 2: ACTIVITY MANAGEMENT FUNCTIONS & TEMPLATES
+// ============================================================================
 
-    if (error) {
-      console.error('[Google Sign-In] Supabase error:', error);
-      alert(`Error signing in with Google: ${(error as Error)?.message || 'Unknown error'}`);
-      setLoading(false);
-      return;
-    }
-
-    // Use Supabase user data instead of decoding JWT manually
-    const user = data.user;
-    setCurrentPage('dashboard');
-    setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'User');
-    setUser({ 
-      email: user.email || '', 
-      id: user.id,
-      name: user.user_metadata?.name || undefined,
-      picture: user.user_metadata?.picture || undefined
-    });
-    
-    // Load user connections and activities
-    await loadUserConnections(user.id);
-    await loadUserActivities(user.id);
-    
-    sessionStorage.setItem('hasVisited', 'true');
-    
-    // If this is first sign-up from connection selection, add that connection
-    if (selectedConnection && selectedFrequency) {
-      await handleAddConnection(selectedConnection);
-    }
-    
-    alert('Welcome to TinyNudge!');
-    setLoading(false);
-  } catch (error) {
-    console.error('[Google Sign-In] Error processing Google Sign-In:', error);
-    alert('Error signing in with Google');
-    setLoading(false);
-  }
-};
-
-    try {
-  window.google.accounts.id.initialize({
-    client_id: GOOGLE_CLIENT_ID,
-    callback: window.handleGoogleSignIn,
-    auto_select: false,
-    cancel_on_tap_outside: false
-  });
-} catch (error) {
-  console.error('[Google Sign-In] Initialization error:', error);
-}
-    } else {
-      console.error('[Google Sign-In] window.google not available after script load');
-    }
-  };
-
-  return () => {
-    if (document.head.contains(script)) {
-      document.head.removeChild(script);
-    }
-  };
-}, []);
-
-useEffect(() => {
-  // Render the Google button after the DOM is ready and script is loaded
-  const buttonEl = document.getElementById('google-signin-button');
-  if (window.google && buttonEl) {
-    window.google.accounts.id.renderButton(
-      buttonEl,
-      { 
-        theme: 'outline', 
-        size: 'large',
-        type: 'standard',
-        text: 'continue_with'
-      }
-    );
-    console.log('[Google Sign-In] Button rendered (post-mount)');
-  }
-}, []);
-  // State management
-  const [currentPage, setCurrentPage] = useState('home');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [showFrequencyModal, setShowFrequencyModal] = useState(false);
-  const [showAddConnectionModal, setShowAddConnectionModal] = useState(false);
-  const [showActivitiesModal, setShowActivitiesModal] = useState(false);
-  const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
-  const [selectedActivityConnection, setSelectedActivityConnection] = useState<Connection | null>(null);
-  const [showLoading, setShowLoading] = useState(false);
-  const [selectedFrequency, setSelectedFrequency] = useState<Frequency | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [userName, setUserName] = useState('');
-  const [isFirstTime, setIsFirstTime] = useState(true);
-  const [userConnections, setUserConnections] = useState<Connection[]>([]);
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [userActivities, setUserActivities] = useState<Activity[]>([]);
-  const [lastActivitiesLoad, setLastActivitiesLoad] = useState<string | null>(null);
-  const [activityTemplates] = useState<Record<string, string[]>>({
+// Activity Templates for each connection type
+const activityTemplates: Record<string, string[]> = {
   'Partner': [
     'Send a heartfelt good morning text',
     'Plan a surprise date night',
@@ -285,72 +199,224 @@ useEffect(() => {
     'Talk about your day',
     'Plan a fun outing'
   ]
-  
-});
-  // Check if user is returning (using sessionStorage instead of localStorage)
-  useEffect(() => {
-    const hasVisited = sessionStorage.getItem('hasVisited');
-    if (hasVisited) {
-      setIsFirstTime(false);
-    }
-  }, []);
-// Sync activities when userActivities change
-useEffect(() => {
-  if (selectedActivityConnection && userActivities.length > 0) {
-    const connectionActivities = getActivitiesForConnection(userActivities, selectedActivityConnection.id);
-    setActivities(connectionActivities);
-  }
-}, [userActivities, selectedActivityConnection]);
-useEffect(() => {
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      setUser({ 
-        email: session.user.email || '', 
-        id: session.user.id,
-        name: session.user.user_metadata?.name,
-        picture: session.user.user_metadata?.picture
-      });
-      setUserName(session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User');
-      setCurrentPage('dashboard');
-      await loadUserConnections(session.user.id);
-      await loadUserActivities(session.user.id);
-    }
-  };
-  checkAuth();
-}, []);
-useEffect(() => {
-  const syncActivities = async () => {
-    if (selectedActivityConnection && user?.id) {
-      const loadedActivities = await loadUserActivities(user.id);
-      const connectionActivities = loadedActivities.filter(
-        (activity: Activity) => activity.connection_id === selectedActivityConnection.id
-      );
-      setActivities(connectionActivities);
-    }
-  };
-
-  syncActivities();
-}, [selectedActivityConnection, userActivities, user?.id]);
-// STEP 7: Debug logging - ADD THIS RIGHT AFTER STEP 5
-useEffect(() => {
-  console.log('User activities updated:', userActivities.length);
-  console.log('User connections updated:', userConnections.length);
-  
-  // Optional: Log more details for debugging
-  if (userActivities.length > 0) {
-    console.log('Sample activity:', userActivities[0]);
-  }
-  if (userConnections.length > 0) {
-    console.log('Sample connection:', userConnections[0]);
-  }
-}, [userActivities, userConnections]);
-// ...handler functions start here...
-const handleConnectionSelect = (connectionType: Connection) => {
-  setSelectedConnection(connectionType);
-  setShowFrequencyModal(true);
 };
-  // Data
+
+// ============================================================================
+// DATABASE HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Load all connections for a user
+ */
+async function loadUserConnections(userId: string): Promise<Connection[]> {
+  if (!userId) {
+    console.error('loadUserConnections: No userId provided');
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('user_connections')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error loading user connections:', error);
+      return [];
+    }
+
+    return (data || []).map((conn) => ({
+      id: conn.id,
+      title: conn.title,
+      emoji: conn.emoji,
+      description: conn.description,
+      frequency: conn.frequency,
+      activitiesCompleted: conn.activities_completed || 0,
+      totalActivities: conn.total_activities || 5,
+      isPaused: conn.is_paused || false
+    }));
+  } catch (error) {
+    console.error('Unexpected error loading connections:', error);
+    return [];
+  }
+}
+
+/**
+ * Load all activities for a user
+ */
+async function loadUserActivities(userId: string): Promise<Activity[]> {
+  if (!userId) {
+    console.error('loadUserActivities: No userId provided');
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('user_activities')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error loading user activities:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Unexpected error loading activities:', error);
+    return [];
+  }
+}
+
+/**
+ * Get activities for a specific connection
+ */
+function getActivitiesForConnection(activities: Activity[], connectionId: string): Activity[] {
+  if (!connectionId || !Array.isArray(activities)) {
+    return [];
+  }
+  return activities.filter(activity => activity.connection_id === connectionId);
+}
+
+/**
+ * Update activity status
+ */
+async function updateActivityStatus(
+  activityId: string, 
+  status: 'active' | 'completed' | 'skipped' | 'paused',
+  userId: string
+): Promise<Activity | null> {
+  if (!activityId || !userId) {
+    throw new Error('Activity ID and User ID are required');
+  }
+
+  try {
+    const updateData: any = {
+      status: status,
+      completed_at: status === 'completed' ? new Date().toISOString() : null
+    };
+
+    const { data, error } = await supabase
+      .from('user_activities')
+      .update(updateData)
+      .eq('id', activityId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating activity status:', error);
+      throw new Error(`Failed to update activity: ${error.message}`);
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Unexpected error in updateActivityStatus:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create activities for a new connection
+ */
+async function createActivitiesForConnection(
+  connectionId: string, 
+  connectionTitle: string, 
+  userId: string
+): Promise<Activity[]> {
+  if (!connectionId || !connectionTitle || !userId) {
+    throw new Error('Missing required parameters for creating activities');
+  }
+
+  const templates = activityTemplates[connectionTitle] || activityTemplates['Friend'];
+  
+  if (!templates || templates.length === 0) {
+    throw new Error(`No activity templates found for ${connectionTitle}`);
+  }
+
+  console.log('Creating activities for connection ID:', connectionId);
+  console.log('User ID:', userId);
+  console.log('Templates found:', templates.length);
+  
+  const activitiesToCreate = templates.map((template) => ({
+    connection_id: connectionId,
+    title: template,
+    description: `A meaningful way to connect with your ${connectionTitle.toLowerCase()}`,
+    status: 'active' as const,
+    user_id: userId,
+    created_at: new Date().toISOString(),
+    completed_at: null
+  }));
+
+  try {
+    console.log('Activities payload:', activitiesToCreate);
+    
+    const { data, error } = await supabase
+      .from('user_activities')
+      .insert(activitiesToCreate)
+      .select();
+
+    if (error) {
+      console.error('Supabase error creating activities:', error);
+      throw new Error(`Failed to create activities: ${error.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error('No activities were created - database returned empty result');
+    }
+
+    console.log('Successfully created activities:', data);
+    return data;
+  } catch (error) {
+    console.error('Error in createActivitiesForConnection:', error);
+    throw error;
+  }
+}
+// ============================================================================
+// PART 3: MAIN COMPONENT, STATE, AND USEEFFECT HOOKS
+// ============================================================================
+
+export default function Page() {
+  // ============================================================================
+  // STATE MANAGEMENT
+  // ============================================================================
+  
+  const [currentPage, setCurrentPage] = useState('home');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showFrequencyModal, setShowFrequencyModal] = useState(false);
+  
+  // Form states
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signinEmail, setSigninEmail] = useState('');
+  const [signinPassword, setSigninPassword] = useState('');
+  const [showSigninPassword, setShowSigninPassword] = useState(false);
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [showAddConnectionModal, setShowAddConnectionModal] = useState(false);
+  const [showActivitiesModal, setShowActivitiesModal] = useState(false);
+  const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
+  const [selectedActivityConnection, setSelectedActivityConnection] = useState<Connection | null>(null);
+  const [showLoading, setShowLoading] = useState(false);
+  const [selectedFrequency, setSelectedFrequency] = useState<Frequency | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [userName, setUserName] = useState('');
+  const [isFirstTime, setIsFirstTime] = useState(true);
+  const [userConnections, setUserConnections] = useState<Connection[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [userActivities, setUserActivities] = useState<Activity[]>([]);
+  const [signinEmail, setSigninEmail] = useState('');
+  const [signinPassword, setSigninPassword] = useState('');
+  const [showSigninPassword, setShowSigninPassword] = useState(false);
+  const [lastActivitiesLoad, setLastActivitiesLoad] = useState<string | null>(null);
+
+  // ============================================================================
+  // STATIC DATA
+  // ============================================================================
+  
   const frequencies: Frequency[] = [
     {
       id: 'daily',
@@ -412,544 +478,934 @@ const handleConnectionSelect = (connectionType: Connection) => {
     { id: 'roommate', title: 'Roommate', emoji: '🏡', description: 'Create harmony at home' }
   ];
 
-// Create activities for a new connection
-const createActivitiesForConnection = async (connectionId: string, connectionTitle: string, userId: string) => {
-  const templates = activityTemplates[connectionTitle] || activityTemplates['Friend'];
-  
-  console.log('Creating activities for connection ID:', connectionId);
-  console.log('User ID:', userId);
-  
-  const activitiesToCreate = templates.map((template) => ({
-    connection_id: connectionId, // This should now be the correct database ID
-    title: template,
-    description: `A meaningful way to connect with your ${connectionTitle.toLowerCase()}`,
-    status: 'active',
-    user_id: userId,
-    created_at: new Date().toISOString()
-  }));
+  // ============================================================================
+  // USEEFFECT HOOKS
+  // ============================================================================
 
-  try {
-    console.log('Activities to create:', activitiesToCreate);
+  // Load Google Sign-In script
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+
+    script.onload = () => {
+      console.log('[Google Sign-In] Script loaded');
+      if (window.google && window.google.accounts) {
+        window.handleGoogleSignIn = async (response: any) => {
+          try {
+            console.log('[Google Sign-In] Callback fired', response);
+            
+            const { data, error } = await supabase.auth.signInWithIdToken({
+              provider: 'google',
+              token: response.credential,
+            });
+
+            if (error) {
+              console.error('[Google Sign-In] Supabase error:', error);
+              alert(`Error signing in with Google: ${(error as Error)?.message || 'Unknown error'}`);
+              setLoading(false);
+              return;
+            }
+
+            const user = data.user;
+            setCurrentPage('dashboard');
+            setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'User');
+            setUser({ 
+              email: user.email || '', 
+              id: user.id,
+              name: user.user_metadata?.name || undefined,
+              picture: user.user_metadata?.picture || undefined
+            });
+            
+            const connections = await loadUserConnections(user.id);
+            const activities = await loadUserActivities(user.id);
+            setUserConnections(connections);
+            setUserActivities(activities);
+            
+            sessionStorage.setItem('hasVisited', 'true');
+            
+            if (selectedConnection && selectedFrequency) {
+              await handleAddConnection(selectedConnection);
+            }
+            
+            alert('Welcome to TinyNudge!');
+            setLoading(false);
+          } catch (error) {
+            console.error('[Google Sign-In] Error processing Google Sign-In:', error);
+            alert('Error signing in with Google');
+            setLoading(false);
+          }
+        };
+
+        try {
+          window.google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: window.handleGoogleSignIn,
+            auto_select: false,
+            cancel_on_tap_outside: false
+          });
+        } catch (error) {
+          console.error('[Google Sign-In] Initialization error:', error);
+        }
+      } else {
+        console.error('[Google Sign-In] window.google not available after script load');
+      }
+    };
+
+    return () => {
+      if (document.head.contains(script)) {
+        document.head.removeChild(script);
+      }
+    };
+  }, []);
+
+  // Render Google Sign-In button
+  useEffect(() => {
+    const buttonEl = document.getElementById('google-signin-button');
+    if (window.google && buttonEl) {
+      window.google.accounts.id.renderButton(
+        buttonEl,
+        { 
+          theme: 'outline', 
+          size: 'large',
+          type: 'standard',
+          text: 'continue_with'
+        }
+      );
+      console.log('[Google Sign-In] Button rendered (post-mount)');
+    }
+  }, []);
+
+  // Check if user is returning
+  useEffect(() => {
+    const hasVisited = sessionStorage.getItem('hasVisited');
+    if (hasVisited) {
+      setIsFirstTime(false);
+    }
+  }, []);
+
+  // Sync activities when userActivities change
+  useEffect(() => {
+    if (selectedActivityConnection && userActivities.length > 0) {
+      const connectionActivities = getActivitiesForConnection(userActivities, selectedActivityConnection.id);
+      setActivities(connectionActivities);
+    }
+  }, [userActivities, selectedActivityConnection]);
+
+  // Check authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser({ 
+          email: session.user.email || '', 
+          id: session.user.id,
+          name: session.user.user_metadata?.name,
+          picture: session.user.user_metadata?.picture
+        });
+        setUserName(session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User');
+        setCurrentPage('dashboard');
+        const connections = await loadUserConnections(session.user.id);
+        const activities = await loadUserActivities(session.user.id);
+        setUserConnections(connections);
+        setUserActivities(activities);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  // Sync activities for selected connection
+  useEffect(() => {
+    const syncActivities = async () => {
+      if (selectedActivityConnection && user?.id) {
+        const loadedActivities = await loadUserActivities(user.id);
+        const connectionActivities = loadedActivities.filter(
+          (activity: Activity) => activity.connection_id === selectedActivityConnection.id
+        );
+        setActivities(connectionActivities);
+      }
+    };
+
+    syncActivities();
+  }, [selectedActivityConnection, userActivities, user?.id]);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('User activities updated:', userActivities.length);
+    console.log('User connections updated:', userConnections.length);
     
-    const { data, error } = await supabase
-      .from('user_activities')
-      .insert(activitiesToCreate)
-      .select();
-
-    if (error) {
-      console.error('Supabase error details:', error);
-      throw error;
+    if (userActivities.length > 0) {
+      console.log('Sample activity:', userActivities[0]);
     }
-
-    if (data && Array.isArray(data)) {
-      const normalized = data.map((row: any) => ({
-        id: row.id.toString(),
-        connection_id: row.connection_id.toString(),
-        title: row.title,
-        description: row.description,
-        status: row.status,
-        created_at: row.created_at,
-        completed_at: row.completed_at ?? undefined,
-        user_id: row.user_id
-      }));
-
-      const updatedActivities = await loadUserActivities(userId);
-if (Array.isArray(updatedActivities)) {
-  setUserActivities(updatedActivities);
-}
-      console.log('Successfully created activities:', normalized);
+    if (userConnections.length > 0) {
+      console.log('Sample connection:', userConnections[0]);
     }
-  } catch (error) {
-    console.error('Error creating activities:', error);
-    throw error;
-  }
-};
-const saveUserConnections = async (connections: Connection[], userId: string) => {
-  // No longer needed - connections are saved directly to connections table
-  console.log('saveUserConnections called but not needed');
-};
-// Load user connections from Supabase
-const loadUserConnections = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('user_connections')
-      .select('*')
-      .eq('user_id', userId);
+  }, [userActivities, userConnections]);
+
+  // Debug database state
+  useEffect(() => {
+    const debugDatabaseState = async () => {
+      if (!user?.id) return;
       
-    if (error) {
-      console.error('Error loading connections:', error);
+      console.log('=== DEBUG DATABASE STATE ===');
+      console.log('User ID:', user.id);
+      
+      const { data: connections, error: connError } = await supabase
+        .from('user_connections')
+        .select('*')
+        .eq('user_id', user.id);
+      
+      console.log('Connections from direct query:', connections);
+      if (connError) console.error('Connection error:', connError);
+      
+      const { data: activities, error: actError } = await supabase
+        .from('user_activities')
+        .select('*')
+        .eq('user_id', user.id);
+      
+      console.log('Activities from direct query:', activities);
+      if (actError) console.error('Activity error:', actError);
+      console.log('=== END DEBUG ===');
+    };
+
+    if (user?.id) {
+      console.log('User detected, running debug...');
+      debugDatabaseState();
+    }
+  }, [user]);
+  // ============================================================================
+// PART 4: EVENT HANDLER FUNCTIONS
+// ============================================================================
+
+  // Handle connection selection
+  const handleConnectionSelect = (connectionType: Connection) => {
+    if (!connectionType) {
+      alert('Please select a valid connection type');
       return;
     }
     
-    if (Array.isArray(data)) {
-      const connections: Connection[] = data.map(row => ({
-        id: row.id.toString(),
-        title: row.title,
-        emoji: row.emoji,
-        description: row.description,
-        frequency: row.frequency,
-        activitiesCompleted: row.activities_completed || 0,
-        totalActivities: row.total_activities || 5,
-        isPaused: row.is_paused || false
-      }));
-      setUserConnections(connections);
-      console.log('Loaded connections:', connections);
-    }
-  } catch (error) {
-    console.error('Error loading connections:', error);
-  }
-};
-   // Handler functions
-  // Removed duplicate handleConnectionSelect
+    setSelectedConnection(connectionType);
+    handleAddConnection(connectionType);
+  };
 
+  // Handle frequency selection
   const handleFrequencySelect = (frequency: Frequency) => {
+    if (!frequency) {
+      alert('Please select a valid frequency');
+      return;
+    }
+    
+    if (!selectedConnection) {
+      alert('Please select a connection type first');
+      setShowFrequencyModal(false);
+      return;
+    }
+    
     setSelectedFrequency(frequency);
     setShowFrequencyModal(false);
     setShowLoading(true);
+    
     setTimeout(() => {
       setShowLoading(false);
       setCurrentPage('signin');
     }, 3000);
   };
 
-const handleAddConnection = async (connectionType: Connection) => {
-  // Prevent duplicate connections by title
-  const duplicate = userConnections.some(conn => conn.title === connectionType.title);
-  if (duplicate) {
-    alert('You have already added this connection. Please choose a different one.');
-    return;
-  }
+  // Handle adding a connection
+  const handleAddConnection = async (connectionType: Connection) => {
+    if (!connectionType || !connectionType.title) {
+      alert('Invalid connection type selected');
+      return;
+    }
 
-  if (!user?.id) return;
+    if (!user?.id) {
+      alert('Please sign in to add connections');
+      return;
+    }
 
-  try {
-    // Create connection record in user_connections table
-    const { data: connectionRecord, error: connectionError } = await supabase
-      .from('user_connections')
-      .insert([{
+    const duplicate = userConnections.some(conn => conn.title === connectionType.title);
+    if (duplicate) {
+      alert(`You already have a connection for ${connectionType.title}. Please choose a different one.`);
+      return;
+    }
+
+    try {
+      console.log('Adding connection for user:', user.id);
+      console.log('Connection type:', connectionType);
+      console.log('Selected frequency:', selectedFrequency);
+
+      const connectionPayload = {
         user_id: user.id,
         title: connectionType.title,
         emoji: connectionType.emoji,
         description: connectionType.description,
-        frequency: selectedFrequency?.title || 'Weekly',
+        frequency: selectedFrequency?.title || 'As needed',
         activities_completed: 0,
         total_activities: 5,
-        is_paused: false,
-        created_at: new Date().toISOString()
-      }])
-      .select()
-      .single();
+        is_paused: false
+      };
 
-    if (connectionError) {
-      console.error('Error creating connection:', connectionError);
-      alert('Error creating connection: ' + connectionError.message);
+      console.log('Connection payload:', connectionPayload);
+
+      const { data: connectionRecord, error: connectionError } = await supabase
+        .from('user_connections')
+        .insert([connectionPayload])
+        .select()
+        .single();
+
+      if (connectionError) {
+        console.error('Supabase connection error:', connectionError);
+        alert(`Failed to create connection: ${connectionError.message}`);
+        return;
+      }
+
+      if (!connectionRecord) {
+        alert('Failed to create connection - no data returned');
+        return;
+      }
+
+      console.log('Successfully created connection record:', connectionRecord);
+
+      const newConnection: Connection = {
+        id: connectionRecord.id,
+        title: connectionRecord.title,
+        emoji: connectionRecord.emoji,
+        description: connectionRecord.description,
+        frequency: connectionRecord.frequency,
+        activitiesCompleted: connectionRecord.activities_completed || 0,
+        totalActivities: connectionRecord.total_activities || 5,
+        isPaused: connectionRecord.is_paused || false
+      };
+
+      setUserConnections(prev => [...prev, newConnection]);
+
+      try {
+        const createdActivities = await createActivitiesForConnection(
+          connectionRecord.id, 
+          connectionType.title, 
+          user.id
+        );
+        console.log('Successfully created activities:', createdActivities);
+      } catch (activityError) {
+        console.error('Error creating activities:', activityError);
+        alert('Connection created but failed to generate activities. Please try refreshing the page.');
+      }
+      
+      try {
+        const reloadedActivities = await loadUserActivities(user.id);
+        setUserActivities(reloadedActivities);
+      } catch (reloadError) {
+        console.error('Error reloading activities:', reloadError);
+      }
+      
+      setShowAddConnectionModal(false);
+      setSelectedConnection(null);
+      setSelectedFrequency(null);
+
+    } catch (error) {
+      console.error('Unexpected error in handleAddConnection:', error);
+      alert(`Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Handle deleting a connection
+  const handleDeleteConnection = async (connectionId: string) => {
+    if (!connectionId) {
+      alert('Invalid connection ID');
       return;
     }
 
-    console.log('Created connection record:', connectionRecord);
-
-    // Build a local representation of the newly created connection
-    const newConnection: Connection = {
-      id: connectionRecord.id.toString(), // This is the correct database ID
-      title: connectionRecord.title,
-      emoji: connectionRecord.emoji,
-      description: connectionRecord.description,
-      frequency: connectionRecord.frequency || (selectedFrequency?.title || 'Weekly'),
-      activitiesCompleted: connectionRecord.activities_completed || 0,
-      totalActivities: connectionRecord.total_activities || 5,
-      isPaused: connectionRecord.is_paused || false
-    };
-
-    // Update local state immediately
-    setUserConnections(prev => [...prev, newConnection]);
-
-    // FIX: Use the database ID (connectionRecord.id) not the type ID
-    await createActivitiesForConnection(connectionRecord.id.toString(), connectionType.title, user.id);
-// Reload activities to ensure state consistency
-const updatedActivities = await loadUserActivities(user.id);
-if (Array.isArray(updatedActivities)) {
-  setUserActivities(updatedActivities);
-}
-    
-    // Reload activities to ensure state is consistent  
-    await loadUserActivities(user.id);
-
-    setShowAddConnectionModal(false);
-    alert('Connection added successfully!');
-
-  } catch (error) {
-    console.error('Error in handleAddConnection:', error);
-    alert('Error adding connection');
-  }
-};
-const handleDeleteConnection = async (connectionId: string) => {
-  if (!window.confirm('Are you sure you want to delete this connection and all its activities?')) {
-    return;
-  }
-
-  try {
-    // Delete activities first
-    const { error: activitiesError } = await supabase
-      .from('user_activities')
-      .delete()
-      .eq('connection_id', connectionId)
-      .eq('user_id', user?.id);
-
-    if (activitiesError) {
-      console.error('Error deleting activities:', activitiesError);
+    if (!user?.id) {
+      alert('Please sign in to delete connections');
+      return;
     }
 
-        // Delete connection
-        const { error: connectionError } = await supabase
-          .from('user_connections')
-          .delete()
-          .eq('id', connectionId)
-          .eq('user_id', user?.id);
+    if (!window.confirm('Are you sure you want to delete this connection and all its activities? This action cannot be undone.')) {
+      return;
+    }
 
-        if (connectionError) {
-          console.error('Error deleting connection:', connectionError);
-          alert('Error deleting connection');
-          return;
-        }
+    try {
+      console.log('Deleting connection:', connectionId, 'for user:', user.id);
 
-        // Update local state
-        setUserConnections(prev => prev.filter(conn => conn.id !== connectionId));
-        setUserActivities(prev => prev.filter(activity => activity.connection_id !== connectionId));
+      const { error: activitiesError } = await supabase
+        .from('user_activities')
+        .delete()
+        .eq('connection_id', connectionId)
+        .eq('user_id', user.id);
 
-        alert('Connection deleted successfully');
-      } catch (error) {
-        console.error('Error in handleDeleteConnection:', error);
+      if (activitiesError) {
+        console.error('Error deleting activities:', activitiesError);
+        alert(`Failed to delete activities: ${activitiesError.message}`);
+        return;
       }
-    };
 
-    // Handle pausing/resuming a connection and update related activities
-    const handleTogglePause = async (connectionId: string) => {
-      const connection = userConnections.find(conn => conn.id === connectionId);
-      if (!connection || !user?.id) return;
+      const { error: connectionError } = await supabase
+        .from('user_connections')
+        .delete()
+        .eq('id', connectionId)
+        .eq('user_id', user.id);
 
-      const newPauseStatus = !connection.isPaused;
+      if (connectionError) {
+        console.error('Error deleting connection:', connectionError);
+        alert(`Failed to delete connection: ${connectionError.message}`);
+        return;
+      }
 
-      try {
-        // Update connection pause status in database
-        const { error: connectionError } = await supabase
-          .from('user_connections')
-          .update({ is_paused: newPauseStatus })
-          .eq('id', connectionId)
+      setUserConnections(prev => prev.filter(conn => conn.id !== connectionId));
+      setUserActivities(prev => prev.filter(activity => activity.connection_id !== connectionId));
+
+      if (selectedActivityConnection?.id === connectionId) {
+        setShowActivitiesModal(false);
+        setSelectedActivityConnection(null);
+        setActivities([]);
+      }
+
+      alert('Connection deleted successfully');
+    } catch (error) {
+      console.error('Unexpected error in handleDeleteConnection:', error);
+      alert(`Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Handle toggling pause state
+  const handleTogglePause = async (connectionId: string) => {
+    if (!connectionId || !user?.id) {
+      alert('Invalid connection or user');
+      return;
+    }
+
+    const connection = userConnections.find(conn => conn.id === connectionId);
+    if (!connection) {
+      alert('Connection not found');
+      return;
+    }
+
+    const newPauseStatus = !connection.isPaused;
+
+    try {
+      console.log(`${newPauseStatus ? 'Pausing' : 'Resuming'} connection:`, connectionId);
+
+      const { error: connectionError } = await supabase
+        .from('user_connections')
+        .update({ is_paused: newPauseStatus })
+        .eq('id', connectionId)
+        .eq('user_id', user.id);
+
+      if (connectionError) {
+        console.error('Error updating connection pause status:', connectionError);
+        alert(`Failed to ${newPauseStatus ? 'pause' : 'resume'} connection: ${connectionError.message}`);
+        return;
+      }
+
+      setUserConnections(prev => 
+        prev.map(conn => 
+          conn.id === connectionId 
+            ? { ...conn, isPaused: newPauseStatus }
+            : conn
+        )
+      );
+
+      const connectionActivities = getActivitiesForConnection(userActivities, connectionId);
+      const activitiesToUpdate = connectionActivities.filter(
+        activity => activity.status === 'active' || activity.status === 'paused'
+      );
+
+      if (activitiesToUpdate.length > 0) {
+        const newActivityStatus = newPauseStatus ? 'paused' : 'active';
+        
+        const { error: activitiesError } = await supabase
+          .from('user_activities')
+          .update({ status: newActivityStatus })
+          .in('id', activitiesToUpdate.map(a => a.id))
           .eq('user_id', user.id);
 
-        if (connectionError) {
-          console.error('Error updating connection pause status:', connectionError);
-          alert('Error updating connection status');
-          return;
-        }
+        if (activitiesError) {
+          console.error('Error updating activity statuses:', activitiesError);
+          alert('Connection status updated, but some activities may not have been updated properly');
+        } else {
+          setUserActivities(prev =>
+            prev.map(activity =>
+              activitiesToUpdate.find(a => a.id === activity.id)
+                ? { ...activity, status: newActivityStatus }
+                : activity
+            )
+          );
 
-        // Update local state
-        setUserConnections(prev => 
-          prev.map(conn => 
-            conn.id === connectionId 
-              ? { ...conn, isPaused: newPauseStatus }
-              : conn
-          )
-        );
-
-  // Update all active/paused activities for this connection
-  const connectionActivities = getActivitiesForConnection(userActivities, connectionId);
-  const newActivityStatus = newPauseStatus ? 'paused' : 'active';
-
-        for (const activity of connectionActivities) {
-          if (activity.status === 'active' || activity.status === 'paused') {
-            await updateActivityStatus(activity.id, newActivityStatus, user.id);
+          if (selectedActivityConnection?.id === connectionId) {
+            setActivities(prev =>
+              prev.map(activity =>
+                activitiesToUpdate.find(a => a.id === activity.id)
+                  ? { ...activity, status: newActivityStatus }
+                  : activity
+              )
+            );
           }
         }
-
-        console.log(`Connection ${connectionId} ${newPauseStatus ? 'paused' : 'resumed'}`);
-
-      } catch (error) {
-        console.error('Error in handleTogglePause:', error);
-        alert('Error updating connection status');
       }
-    };
 
-// REPLACE entire function with:
-const handleViewActivities = async (connection: Connection) => {
-  setSelectedActivityConnection(connection);
+      alert(`Connection ${newPauseStatus ? 'paused' : 'resumed'} successfully`);
 
-  if (user?.id) {
-    const updatedActivities = await loadUserActivities(user.id);
-    if (Array.isArray(updatedActivities)) {
+    } catch (error) {
+      console.error('Unexpected error in handleTogglePause:', error);
+      alert(`Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Handle viewing activities
+  const handleViewActivities = async (connection: Connection) => {
+    if (!connection || !connection.id) {
+      alert('Invalid connection selected');
+      return;
+    }
+
+    if (!user?.id) {
+      alert('Please sign in to view activities');
+      return;
+    }
+
+    try {
+      console.log('Loading activities for connection:', connection.id);
+      
+      setSelectedActivityConnection(connection);
+
+      const updatedActivities = await loadUserActivities(user.id);
       setUserActivities(updatedActivities);
       
       const connectionActivities = updatedActivities.filter(
         activity => activity.connection_id === connection.id
       );
       
-      console.log('Viewing activities for connection:', connection.id, 'found:', connectionActivities.length);
+      console.log(`Found ${connectionActivities.length} activities for connection ${connection.title}`);
       setActivities(connectionActivities);
-    }
-  }
-  
-  setShowActivitiesModal(true);
-};
-  // REPLACE entire function with:
-const handleCompleteActivity = async (activityId: string) => {
-  if (!user?.id) return;
-
-  try {
-    await updateActivityStatus(activityId, 'completed', user.id);
-    
-    // Reload activities to ensure consistency
-    const updatedActivities = await loadUserActivities(user.id);
-    if (Array.isArray(updatedActivities)) {
-      setUserActivities(updatedActivities);
       
-      // Update the modal display
-      if (selectedActivityConnection) {
-        const connectionActivities = updatedActivities.filter(
-          activity => activity.connection_id === selectedActivityConnection.id
-        );
-        setActivities(connectionActivities);
-      }
+      setShowActivitiesModal(true);
+    } catch (error) {
+      console.error('Error loading activities:', error);
+      alert(`Failed to load activities: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-    
-    // Update connection progress
-    if (selectedActivityConnection) {
-      const connectionActivities = getActivitiesForConnection(updatedActivities, selectedActivityConnection.id);
-      const completedCount = connectionActivities.filter(a => a.status === 'completed').length;
-      
-      await supabase
-        .from('user_connections')
-        .update({ activities_completed: completedCount })
-        .eq('id', selectedActivityConnection.id)
-        .eq('user_id', user.id);
+  };
 
-      setUserConnections(prev => 
-        prev.map(conn => 
-          conn.id === selectedActivityConnection.id 
-            ? { ...conn, activitiesCompleted: completedCount }
-            : conn
+  // Handle completing an activity
+  const handleCompleteActivity = async (activityId: string) => {
+    if (!activityId || !user?.id) {
+      alert('Invalid activity or user');
+      return;
+    }
+
+    try {
+      console.log('Completing activity:', activityId);
+      
+      const updatedActivity = await updateActivityStatus(activityId, 'completed', user.id);
+      console.log('Activity marked as completed:', updatedActivity);
+      
+      setUserActivities(prev =>
+        prev.map(activity =>
+          activity.id === activityId
+            ? { ...activity, status: 'completed', completed_at: new Date().toISOString() }
+            : activity
         )
       );
+
+      if (selectedActivityConnection) {
+        const updatedActivities = await loadUserActivities(user.id);
+        const connectionActivities = updatedActivities.filter(
+          activity => activity.connection_id === selectedActivityConnection.id
+        );
+        setActivities(connectionActivities);
+
+        const completedCount = connectionActivities.filter(a => a.status === 'completed').length;
+        
+        try {
+          await supabase
+            .from('user_connections')
+            .update({ activities_completed: completedCount })
+            .eq('id', selectedActivityConnection.id)
+            .eq('user_id', user.id);
+
+          setUserConnections(prev => 
+            prev.map(conn => 
+              conn.id === selectedActivityConnection.id 
+                ? { ...conn, activitiesCompleted: completedCount }
+                : conn
+            )
+          );
+        } catch (progressError) {
+          console.error('Error updating connection progress:', progressError);
+        }
+      }
+
+    } catch (error) {
+      console.error('Error completing activity:', error);
+      alert(`Failed to complete activity: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Handle skipping an activity
+  const handleSkipActivity = async (activityId: string) => {
+    if (!activityId || !user?.id) {
+      alert('Invalid activity or user');
+      return;
     }
 
-  } catch (error) {
-    console.error('Error completing activity:', error);
-    alert('Error completing activity');
-  }
-};
- // PART 4: Fix the handleSkipActivity function
-// REPLACE entire function with:
-const handleSkipActivity = async (activityId: string) => {
-  if (!user?.id) return;
-
-  try {
-    await updateActivityStatus(activityId, 'skipped', user.id);
-    
-    // Reload activities to ensure consistency
-    const updatedActivities = await loadUserActivities(user.id);
-    if (Array.isArray(updatedActivities)) {
-      setUserActivities(updatedActivities);
+    try {
+      console.log('Skipping activity:', activityId);
       
-      // Update the modal display
+      await updateActivityStatus(activityId, 'skipped', user.id);
+      
+      setUserActivities(prev =>
+        prev.map(activity =>
+          activity.id === activityId
+            ? { ...activity, status: 'skipped', completed_at: null }
+            : activity
+        )
+      );
+
       if (selectedActivityConnection) {
+        const updatedActivities = await loadUserActivities(user.id);
         const connectionActivities = updatedActivities.filter(
           activity => activity.connection_id === selectedActivityConnection.id
         );
         setActivities(connectionActivities);
       }
+    } catch (error) {
+      console.error('Error skipping activity:', error);
+      alert(`Failed to skip activity: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Handle undoing a skip
+  const handleUndoSkipActivity = async (activityId: string) => {
+    if (!activityId || !user?.id) {
+      alert('Invalid activity or user');
+      return;
     }
 
-  } catch (error) {
-    console.error('Error skipping activity:', error);
-    alert('Error skipping activity');
-  }
-};
-// ALSO ADD: Function to undo skip activity
-const handleUndoSkipActivity = async (activityId: string) => {
-  if (!user?.id) {
-    console.error('No user ID available for undoing skip');
-    return;
-  }
+    try {
+      console.log('Undoing skip for activity:', activityId);
 
-  try {
-    // Check if the connection is paused before setting to active
-    const activity = userActivities.find(a => a.id === activityId);
-    const connection = userConnections.find(c => c.id === activity?.connection_id);
+      const activity = userActivities.find(a => a.id === activityId);
+      const connection = userConnections.find(c => c.id === activity?.connection_id);
+      
+      const newStatus = connection?.isPaused ? 'paused' : 'active';
+      
+      await updateActivityStatus(activityId, newStatus, user.id);
+
+      setUserActivities(prev =>
+        prev.map(act =>
+          act.id === activityId
+            ? { ...act, status: newStatus, completed_at: null }
+            : act
+        )
+      );
+
+      setActivities(prev => 
+        prev.map(act => 
+          act.id === activityId 
+            ? { ...act, status: newStatus, completed_at: null }
+            : act
+        )
+      );
+
+      console.log(`Activity ${activityId} unskipped successfully`);
+
+    } catch (error) {
+      console.error('Error undoing skip activity:', error);
+      alert(`Failed to undo skip: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Handle Google Sign-In
+  const handleGoogleSignIn = () => {
+    if (!window.google) {
+      alert('Google Sign-In is still loading. Please wait a moment and try again.');
+      return;
+    }
     
-    const newStatus = connection?.isPaused ? 'paused' : 'active';
+    if (loading) {
+      console.log('Sign-in already in progress');
+      return;
+    }
     
-    await updateActivityStatus(activityId, newStatus, user.id);
+    setLoading(true);
+    
+    try {
+      window.google.accounts.id.prompt((notification: any) => {
+        if (notification.isNotDisplayed()) {
+          console.log('Google Sign-In popup was blocked or not displayed');
+          alert('Please allow popups for this site to use Google Sign-In, or try the email option below.');
+          setLoading(false);
+        } else if (notification.isSkippedMoment()) {
+          console.log('Google Sign-In was skipped by user');
+          setLoading(false);
+        }
+      });
+    } catch (error) {
+      console.error('Error triggering Google Sign-In:', error);
+      alert('Error with Google Sign-In. Please try the email option below.');
+      setLoading(false);
+    }
+  };
 
-    // Update the modal activities display
-    setActivities(prev => 
-      prev.map(act => 
-        act.id === activityId 
-          ? { ...act, status: newStatus, completed_at: undefined }
-          : act
-      )
-    );
+  // Handle email sign-in
+  const handleEmailSignIn = () => {
+    setCurrentPage('signin');
+  };
 
-    console.log(`Activity ${activityId} unskipped successfully`);
+  const handleSignIn = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: signinEmail,
+        password: signinPassword,
+      });
 
-  } catch (error) {
-    console.error('Error undoing skip activity:', error);
-    alert('Error undoing skip. Please try again.');
-  }
-};
-  
-const handleGoogleSignIn = () => {
-  if (!window.google) {
-    alert('Google Sign-In is loading, please try again in a moment.');
-    return;
-  }
-  
-  setLoading(true);
-  
-  try {
-    // Trigger Google Sign-In prompt directly
-    window.google.accounts.id.prompt((notification: any) => {
-      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        console.log('Google Sign-In was dismissed or not displayed');
-        setLoading(false);
+      if (error) {
+        alert(error.message);
+        return;
       }
-    });
-  } catch (error) {
-    console.error('Error triggering Google Sign-In:', error);
-    alert('Error with Google Sign-In');
-    setLoading(false);
-  }
-};
 
-const handleEmailSignIn = async () => {
-  setLoading(true);
-  const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement | null;
-  const passwordInput = document.querySelector('input[type="password"]') as HTMLInputElement | null;
-  const email = emailInput?.value || '';
-  const password = passwordInput?.value || '';
+      if (data.user) {
+        const user = data.user;
+        setUser({
+          email: user.email || '',
+          id: user.id,
+          name: user.user_metadata?.name || user.email?.split('@')[0] || 'User'
+        });
+        
+        // Load user data
+        const { data: connectionsData } = await supabase
+          .from('connections')
+          .select('*')
+          .eq('user_id', user.id);
+          
+        const { data: activitiesData } = await supabase
+          .from('activities')
+          .select('*')
+          .eq('user_id', user.id);
+          
+        setUserConnections(connectionsData || []);
+        setUserActivities(activitiesData || []);
+        setCurrentPage('dashboard');
+      }
+    } catch (err) {
+      console.error('Sign in error:', err);
+      alert('An error occurred during sign in');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  if (!email || !password) {
-    alert('Please fill in all fields');
-    setLoading(false);
-    return;
-  }
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
 
-  try {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: password,
-    });
+      if (error) {
+        alert(`Error: ${(error as Error)?.message || 'Unknown error'}`);
+        setLoading(false);
+        return;
+      }
 
-    if (error) {
-  alert(`Error: ${(error as Error)?.message || 'Unknown error'}`);
+      setCurrentPage('dashboard');
+      setUser({ email, id: data.user.id });
+      const connections = await loadUserConnections(data.user.id);
+      const activities = await loadUserActivities(data.user.id);
+      setUserConnections(connections);
+      setUserActivities(activities);
+      setUserName(email.split('@')[0]);
+      sessionStorage.setItem('hasVisited', 'true');
+      
+      if (selectedConnection && selectedFrequency) {
+        await handleAddConnection(selectedConnection);
+      }
+      
+      alert('Welcome to TinyNudge!');
+      setLoading(false);
+
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error signing in');
+      setLoading(false);
+    }
+  };
+
+  // Handle email sign-up
+  const handleEmailSignUp = async () => {
+    try {
+      setLoading(true);
+      console.log('Starting sign-up process...');
+      
+      const email = signupEmail.trim();
+      const password = signupPassword;
+
+      console.log('Validating form data:', {
+        hasEmail: !!email,
+        emailLength: email.length,
+        hasPassword: !!password,
+        passwordLength: password.length,
+        passwordsMatch: password === confirmPassword
+      });
+
+      if (!email) {
+        alert('Please enter your email address');
+        return;
+      }
+
+      if (!password) {
+        alert('Please enter your password');
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        alert('Passwords do not match');
+        return;
+      }
+
+      if (password.length < 6) {
+        alert('Password must be at least 6 characters long');
+        return;
+      }
+
+      console.log('All validations passed, attempting to create account...');
+
+      // Create the account
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: {
+            name: email.split('@')[0]
+          }
+        }
+      });
+
+      if (signUpError) {
+        console.error('Signup error:', signUpError);
+        alert(`Error: ${signUpError.message}`);
+        return;
+      }
+
+      // Immediately sign in
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
+
+      if (authError) {
+        console.error('Sign in error:', authError);
+        alert(`Error signing in: ${authError.message}`);
+        return;
+      }
+
+      if (authData.user) {
+        // Update user state
+        setUser({
+          email: authData.user.email || '',
+          id: authData.user.id,
+          name: authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || 'User'
+        });
+        
+        // Redirect to dashboard
+        setCurrentPage('dashboard');
+      }
+      
+      // Automatically sign in after signup
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
+
+      if (signInError) {
+        console.error('Sign in error:', signInError);
+        alert(`Error signing in: ${signInError.message}`);
+        return;
+      }
+
+      // Set user state and redirect
+      const user = signInData.user;
+      setUser({ 
+        email: user.email || '', 
+        id: user.id,
+        name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
+        picture: user.user_metadata?.picture
+      });
+      setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'User');
+      
+      // Load user data
+      const connections = await loadUserConnections(user.id);
+      const activities = await loadUserActivities(user.id);
+      setUserConnections(connections);
+      setUserActivities(activities);
+      
+      setCurrentPage('dashboard');
+      sessionStorage.setItem('hasVisited', 'true');
+
+    } catch (error) {
+      console.error('Unexpected error during signup:', error);
+      alert('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+
+    if (password !== confirmPassword) {
+      alert('Passwords do not match');
       setLoading(false);
       return;
     }
 
-    // Keep your existing app logic after successful authentication
-    setCurrentPage('dashboard');
-    setUser({ email, id: data.user.id }); // Use actual user ID from Supabase
-    await loadUserConnections(data.user.id);
-    await loadUserActivities(data.user.id);
-    setUserName(email.split('@')[0]);
-    sessionStorage.setItem('hasVisited', 'true');
-    
-    // If this is first sign-up from connection selection, add that connection
-   if (selectedConnection && selectedFrequency) {
-  await handleAddConnection(selectedConnection);
-}
-    
-    alert('Welcome to TinyNudge!');
-    setLoading(false);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+      });
 
-  } catch (error) {
-    console.error('Error:', error);
-    alert('Error signing in');
-    setLoading(false);
-  }
-};
-const handleSignOut = async () => {
-  try {
-    // Sign out from Supabase
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Error signing out:', error);
-    }
-  } catch (error) {
-    console.error('Error during sign out:', error);
-  } finally {
-    // Clear all state regardless of Supabase result
-    setUser(null);
-    setUserName('');
-    setUserConnections([]);
-    setUserActivities([]);
-    setActivities([]);
-    setSelectedConnection(null);
-    setSelectedActivityConnection(null);
-    setShowAddConnectionModal(false);
-    setShowActivitiesModal(false);
-    setShowFrequencyModal(false);
-    sessionStorage.removeItem('hasVisited');
-    setCurrentPage('home');
-  }
-};
-const handleEmailSignUp = async () => {
-  setLoading(true);
-  const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement | null;
-  const passwordInputs = document.querySelectorAll('input[type=password]');
-  const email = emailInput?.value || '';
-  const password = passwordInputs[0] ? (passwordInputs[0] as HTMLInputElement).value : '';
-  const confirmPassword = passwordInputs[1] ? (passwordInputs[1] as HTMLInputElement).value : '';
+      if (error) {
+        alert(`Error: ${(error as Error)?.message || 'Unknown error'}`);
+        setLoading(false);
+        return;
+      }
 
-  if (!email || !password || !confirmPassword) {
-    alert('Please fill in all fields');
-    setLoading(false);
-    return;
-  }
-
-  if (password !== confirmPassword) {
-    alert('Passwords do not match');
-    setLoading(false);
-    return;
-  }
-
-  try {
-    const { data, error } = await supabase.auth.signUp({
-      email: email,
-      password: password,
-    });
-
-    if (error) {
-  alert(`Error: ${(error as Error)?.message || 'Unknown error'}`);
+      alert('Please check your email for a verification link!');
       setLoading(false);
-      return;
+
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error creating account');
+      setLoading(false);
     }
+  };
 
-    alert('Please check your email for a verification link!');
-    setLoading(false);
+  // Handle sign-out
+  const handleSignOut = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Error signing out:', error);
+      }
+    } catch (error) {
+      console.error('Error during sign out:', error);
+    } finally {
+      setUser(null);
+      setUserName('');
+      setUserConnections([]);
+      setUserActivities([]);
+      setActivities([]);
+      setSelectedConnection(null);
+      setSelectedActivityConnection(null);
+      setShowAddConnectionModal(false);
+      setShowActivitiesModal(false);
+      setShowFrequencyModal(false);
+      sessionStorage.removeItem('hasVisited');
+      setCurrentPage('home');
+    }
+  };
+  // ============================================================================
+// PART 5: UI COMPONENTS AND MAIN RENDER
+// ============================================================================
 
-  } catch (error) {
-    console.error('Error:', error);
-    alert('Error creating account');
-    setLoading(false);
-  }
-};
-
-const handleEmailSignInUp = async () => {
-  setLoading(true);
-  const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement | null;
-  const passwordInputs = document.querySelectorAll('input[type=password]');
-  const email = emailInput?.value || '';
-  const password = passwordInputs[0] ? (passwordInputs[0] as HTMLInputElement).value : '';
-  const confirmPassword = passwordInputs[1] ? (passwordInputs[1] as HTMLInputElement).value : '';
-
-  // Determine if this is sign in or sign up based on confirm password field
-  if (confirmPassword) {
-    // This is a sign up attempt
-    await handleEmailSignUp();
-  } else {
-    // This is a sign in attempt
-    await handleEmailSignIn();
-  }
-};
   // Component: Loading Screen
   const LoadingScreen = () => (
     <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-50 to-blue-100 flex items-center justify-center relative overflow-hidden">
@@ -1000,44 +1456,44 @@ const handleEmailSignInUp = async () => {
       </div>
       
       <style jsx>{`
-  @keyframes jump {
-    0%, 100% { transform: translateY(0px); }
-    25% { transform: translateY(-8px); }
-    50% { transform: translateY(-15px); }
-    75% { transform: translateY(-8px); }
-  }
-  
-  .animate-jump {
-    animation: jump 1.5s ease-in-out infinite;
-  }
-  
-  @keyframes ring {
-    0%, 100% { transform: rotate(0deg); }
-    10% { transform: rotate(-15deg); }
-    20% { transform: rotate(15deg); }
-    30% { transform: rotate(-10deg); }
-    40% { transform: rotate(10deg); }
-    50% { transform: rotate(-5deg); }
-    60% { transform: rotate(5deg); }
-    70% { transform: rotate(0deg); }
-  }
-  
-  .animate-ring {
-    animation: ring 2s ease-in-out infinite;
-  }
-  
-  @keyframes grow {
-    0% { transform: scale(1); }
-    25% { transform: scale(1.1) rotateZ(2deg); }
-    50% { transform: scale(1.2) rotateZ(-2deg); }
-    75% { transform: scale(1.1) rotateZ(1deg); }
-    100% { transform: scale(1); }
-  }
-  
-  .animate-grow {
-    animation: grow 2.5s ease-in-out infinite;
-  }
-`}</style>
+        @keyframes jump {
+          0%, 100% { transform: translateY(0px); }
+          25% { transform: translateY(-8px); }
+          50% { transform: translateY(-15px); }
+          75% { transform: translateY(-8px); }
+        }
+        
+        .animate-jump {
+          animation: jump 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes ring {
+          0%, 100% { transform: rotate(0deg); }
+          10% { transform: rotate(-15deg); }
+          20% { transform: rotate(15deg); }
+          30% { transform: rotate(-10deg); }
+          40% { transform: rotate(10deg); }
+          50% { transform: rotate(-5deg); }
+          60% { transform: rotate(5deg); }
+          70% { transform: rotate(0deg); }
+        }
+        
+        .animate-ring {
+          animation: ring 2s ease-in-out infinite;
+        }
+        
+        @keyframes grow {
+          0% { transform: scale(1); }
+          25% { transform: scale(1.1) rotateZ(2deg); }
+          50% { transform: scale(1.2) rotateZ(-2deg); }
+          75% { transform: scale(1.1) rotateZ(1deg); }
+          100% { transform: scale(1); }
+        }
+        
+        .animate-grow {
+          animation: grow 2.5s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 
@@ -1046,14 +1502,14 @@ const handleEmailSignInUp = async () => {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl relative mx-4">
         <button
-  onClick={() => setShowFrequencyModal(false)}
-  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 z-10 bg-white rounded-full p-1 shadow-md hover:shadow-lg transition-all"
->
-  <X className="w-5 h-5" />
-</button>
+          onClick={() => setShowFrequencyModal(false)}
+          className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 z-10 bg-white rounded-full p-1 shadow-md hover:shadow-lg transition-all"
+        >
+          <X className="w-5 h-5" />
+        </button>
 
         <div className="text-center mb-6">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">
+          <h3 className="text-2xl font-bold text-gray-900 mb-2">
             Choose Your Connection Frequency
           </h3>
         </div>
@@ -1126,152 +1582,126 @@ const handleEmailSignInUp = async () => {
     </div>
   );
 
-  // PART 5: Fix the Activities Modal component
-// Replace the ActivitiesModal component (around line 570) with this corrected version:
-
-const ActivitiesModal = () => (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-    <div className="bg-white rounded-2xl p-4 sm:p-8 max-w-xs sm:max-w-2xl w-full shadow-2xl relative max-h-[80vh] overflow-y-auto" style={{ minWidth: '320px' }}>
-      {/* DEBUG INFO - You can remove this later */}
-      <div className="absolute top-2 left-2 text-xs text-gray-400">
-        Connection ID: {selectedActivityConnection?.id} | 
-        Activities: {activities.length}
-      </div>
-      {/* Debug controls */}
-      <div className="absolute top-2 right-2 text-xs text-gray-400 flex items-center gap-2">
+  // Component: Activities Modal
+  const ActivitiesModal = () => (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-4 sm:p-8 max-w-xs sm:max-w-2xl w-full shadow-2xl relative max-h-[80vh] overflow-y-auto" style={{ minWidth: '320px' }}>
         <button
-          onClick={async () => {
-            if (user?.id) {
-              const loaded = await loadUserActivities(user.id);
-              setActivities(Array.isArray(loaded) ? loaded.filter(a => a.connection_id === selectedActivityConnection?.id) : []);
-              setLastActivitiesLoad(new Date().toISOString());
-            }
-          }}
-          className="bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-xs"
+          onClick={() => setShowActivitiesModal(false)}
+          className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
         >
-          Reload
+          <X className="w-6 h-6" />
         </button>
-        <div className="text-xs text-gray-400">Updated: {lastActivitiesLoad || 'never'}</div>
-      </div>
 
-      {/* Raw activities JSON for quick debugging */}
-      <div className="absolute left-1/2 transform -translate-x-1/2 bottom-2 text-xs text-gray-500 bg-white/70 rounded px-2 py-1 max-w-full overflow-x-auto">
-        <pre className="whitespace-pre-wrap max-w-[90vw] max-h-24 overflow-auto text-[10px] leading-4">{JSON.stringify(activities, null, 2)}</pre>
-      </div>
-      
-      <button
-        onClick={() => setShowActivitiesModal(false)}
-        className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
-      >
-        <X className="w-6 h-6" />
-      </button>
-      <div className="text-center mb-4 sm:mb-8">
-        <div className="text-3xl sm:text-4xl mb-2 sm:mb-3">{selectedActivityConnection?.emoji}</div>
-        <h3 className="text-lg sm:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">
-          Activities for {selectedActivityConnection?.title}
-        </h3>
-        <p className="text-xs sm:text-sm text-gray-600">
-          Choose activities to strengthen your connection
-        </p>
-      </div>
-      <div className="space-y-3 sm:space-y-4">
-        {activities.map((activity) => (
-          <div 
-            key={activity.id}
-            className={`p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 transition-all duration-200 text-sm sm:text-base ${
-              activity.status === 'completed' 
-                ? 'bg-green-50 border-green-200' 
-                : activity.status === 'skipped'
-                ? 'bg-gray-100 border-gray-300 opacity-60'
-                : activity.status === 'paused'
-                ? 'bg-yellow-50 border-yellow-200'
-                : 'bg-gray-50 border-gray-200'
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <h4 className="font-semibold text-gray-900 mb-2">
-                  {activity.title}
-                </h4>
-                <p className="text-sm text-gray-600 mb-4">
-                  {activity.description}
-                </p>
+        <div className="text-center mb-4 sm:mb-8">
+          <div className="text-3xl sm:text-4xl mb-2 sm:mb-3">{selectedActivityConnection?.emoji}</div>
+          <h3 className="text-lg sm:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">
+            Activities for {selectedActivityConnection?.title}
+          </h3>
+          <p className="text-xs sm:text-sm text-gray-600">
+            Choose activities to strengthen your connection
+          </p>
+        </div>
+
+        <div className="space-y-3 sm:space-y-4">
+          {activities.map((activity) => (
+            <div 
+              key={activity.id}
+              className={`p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 transition-all duration-200 text-sm sm:text-base ${
+                activity.status === 'completed' 
+                  ? 'bg-green-50 border-green-200' 
+                  : activity.status === 'skipped'
+                  ? 'bg-gray-100 border-gray-300 opacity-60'
+                  : activity.status === 'paused'
+                  ? 'bg-yellow-50 border-yellow-200'
+                  : 'bg-gray-50 border-gray-200'
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <h4 className="font-semibold text-gray-900 mb-2">
+                    {activity.title}
+                  </h4>
+                  <p className="text-sm text-gray-600 mb-4">
+                    {activity.description}
+                  </p>
+                </div>
+                {activity.status === 'completed' && (
+                  <div className="text-green-500 ml-4">
+                    <Star className="w-6 h-6 fill-current" />
+                  </div>
+                )}
+                {activity.status === 'skipped' && (
+                  <div className="text-gray-500 ml-4">
+                    <span className="text-sm font-medium">Skipped</span>
+                  </div>
+                )}
+                {activity.status === 'paused' && (
+                  <div className="text-yellow-500 ml-4">
+                    <Pause className="w-5 h-5" />
+                  </div>
+                )}
               </div>
-              {activity.status === 'completed' && (
-                <div className="text-green-500 ml-4">
-                  <Star className="w-6 h-6 fill-current" />
+              {activity.status === 'active' && (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => handleCompleteActivity(activity.id)}
+                    className="flex-1 bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-4 rounded-xl transition-colors"
+                  >
+                    Complete
+                  </button>
+                  <button
+                    onClick={() => handleSkipActivity(activity.id)}
+                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-xl transition-colors"
+                  >
+                    Skip
+                  </button>
                 </div>
               )}
               {activity.status === 'skipped' && (
-                <div className="text-gray-500 ml-4">
-                  <span className="text-sm font-medium">Skipped</span>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => handleUndoSkipActivity(activity.id)}
+                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-xl transition-colors"
+                  >
+                    Undo Skip
+                  </button>
                 </div>
               )}
               {activity.status === 'paused' && (
-                <div className="text-yellow-500 ml-4">
-                  <Pause className="w-5 h-5" />
+                <div className="text-center text-yellow-600 py-2">
+                  <span className="text-sm font-medium">Activity is paused</span>
+                </div>
+              )}
+              {activity.status === 'completed' && activity.completed_at && (
+                <div className="text-center text-green-600 py-2">
+                  <span className="text-xs">
+                    Completed: {new Date(activity.completed_at).toLocaleDateString()}
+                  </span>
                 </div>
               )}
             </div>
-            {activity.status === 'active' && (
-              <div className="flex gap-3">
-                <button
-                  onClick={() => handleCompleteActivity(activity.id)}
-                  className="flex-1 bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-4 rounded-xl transition-colors"
-                >
-                  Complete
-                </button>
-                <button
-                  onClick={() => handleSkipActivity(activity.id)}
-                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-xl transition-colors"
-                >
-                  Skip
-                </button>
-              </div>
-            )}
-            {activity.status === 'skipped' && (
-              <div className="flex gap-3">
-                <button
-                  onClick={() => handleUndoSkipActivity(activity.id)}
-                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-xl transition-colors"
-                >
-                  Undo Skip
-                </button>
-              </div>
-            )}
-            {activity.status === 'paused' && (
-              <div className="text-center text-yellow-600 py-2">
-                <span className="text-sm font-medium">Activity is paused</span>
-              </div>
-            )}
-            {activity.status === 'completed' && activity.completed_at && (
-              <div className="text-center text-green-600 py-2">
-                <span className="text-xs">
-                  Completed: {new Date(activity.completed_at).toLocaleDateString()}
-                </span>
-              </div>
-            )}
-          </div>
-        ))}
-        {activities.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-gray-500 mb-4">All activities completed!</p>
-            <button
-              onClick={() => {
-                if (selectedActivityConnection && user?.id) {
-                  createActivitiesForConnection(selectedActivityConnection.id, selectedActivityConnection.title, user.id);
-                }
-              }}
-              className="bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-6 rounded-xl transition-colors"
-            >
-              Get More Activities
-            </button>
-          </div>
-        )}
+          ))}
+          {activities.length === 0 && (
+            <div className="text-center py-8">
+              <p className="text-gray-500 mb-4">All activities completed!</p>
+              <button
+                onClick={() => {
+                  if (selectedActivityConnection && user?.id) {
+                    createActivitiesForConnection(selectedActivityConnection.id, selectedActivityConnection.title, user.id);
+                  }
+                }}
+                className="bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-6 rounded-xl transition-colors"
+              >
+                Get More Activities
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+
   // Component: Dashboard Header
   const DashboardHeader = () => (
     <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 z-50 flex justify-between items-center px-6 py-4">
@@ -1308,11 +1738,16 @@ const ActivitiesModal = () => (
     </header>
   );
 
-  // Main render logic
+  // ============================================================================
+  // MAIN RENDER LOGIC
+  // ============================================================================
+
+  // Show loading screen
   if (showLoading) {
     return <LoadingScreen />;
   }
 
+  // Sign-in/Sign-up page
   if (currentPage === 'signin') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -1337,43 +1772,64 @@ const ActivitiesModal = () => (
             </div>
 
             <div>
-  <div id="google-signin-button" style={{ display: 'block' }}></div>
-  <button 
-    onClick={handleGoogleSignIn}
-    disabled={loading}
-    className="w-full bg-white hover:bg-gray-50 text-gray-900 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-3 mb-6 transition-colors border border-gray-300 disabled:opacity-50"
-  >
-    <svg className="w-5 h-5" viewBox="0 0 24 24">
-      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-    </svg>
-    {loading ? 'Loading...' : 'Continue with Google 🚀'}
-  </button>
- 
+              <div id="google-signin-button" style={{ display: 'block' }}></div>
+              <button 
+                onClick={handleGoogleSignIn}
+                disabled={loading}
+                className="w-full bg-white hover:bg-gray-50 text-gray-900 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-3 mb-6 transition-colors border border-gray-300 disabled:opacity-50"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                {loading ? 'Loading...' : 'Continue with Google 🚀'}
+              </button>
             </div>
 
-            <div className="space-y-4">
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                console.log('Form submitted with:', {
+                  email: signupEmail,
+                  password: signupPassword,
+                  confirmPassword: signupConfirmPassword
+                });
+                handleEmailSignUp();
+              }} 
+              className="space-y-4"
+            >
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
+                <label htmlFor="signup-email" className="block text-sm font-medium text-gray-900 mb-2">
                   Email Address ✉️
                 </label>
                 <input
+                  id="signup-email"
                   type="email"
+                  value={signupEmail}
+                  onChange={(e) => setSignupEmail(e.target.value)}
                   placeholder="your@email.com"
+                  required
+                  autoComplete="email"
                   className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
+                <label htmlFor="signup-password" className="block text-sm font-medium text-gray-900 mb-2">
                   Password 🔒
                 </label>
                 <div className="relative">
                   <input
+                    id="signup-password"
                     type={showPassword ? "text" : "password"}
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
                     placeholder="Enter your password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
                     className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 pr-12 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                   />
                   <button
@@ -1387,20 +1843,19 @@ const ActivitiesModal = () => (
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
+                <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-gray-900 mb-2">
                   Confirm Password 🔒
-                  <button
-  onClick={handleEmailSignUp}
-  disabled={loading}
-  className="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50"
->
-  {loading ? 'Loading...' : 'Create Account 🚀'}
-</button>
                 </label>
                 <div className="relative">
                   <input
+                    id="signup-confirm-password"
                     type={showConfirmPassword ? "text" : "password"}
+                    value={signupConfirmPassword}
+                    onChange={(e) => setSignupConfirmPassword(e.target.value)}
                     placeholder="Confirm your password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
                     className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 pr-12 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                   />
                   <button
@@ -1413,20 +1868,26 @@ const ActivitiesModal = () => (
                 </div>
               </div>
 
-           {/* Removed handleEmailSignInUp button, use handleEmailSignUp above */}
-            </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Create Account 🚀'}
+              </button>
+            </form>
 
-           <div className="text-center mt-6">
-  <p className="text-gray-600">
-    Already have an account?{' '}
-    <button 
-      onClick={handleEmailSignIn}
-      className="text-pink-500 hover:text-pink-600 font-medium"
-    >
-      Sign in 👋
-    </button>
-  </p>
-</div>
+            <div className="text-center mt-6">
+              <p className="text-gray-600">
+                Already have an account?{' '}
+                <button 
+                  onClick={handleEmailSignIn}
+                  className="text-pink-500 hover:text-pink-600 font-medium"
+                >
+                  Sign in 👋
+                </button>
+              </p>
+            </div>
           </div>
 
           <div className="text-center mt-8">
@@ -1442,6 +1903,7 @@ const ActivitiesModal = () => (
     );
   }
 
+  // Dashboard page
   if (currentPage === 'dashboard') {
     return (
       <>
@@ -1483,9 +1945,9 @@ const ActivitiesModal = () => (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {userConnections.map((connection) => {
                     const connectionActivities = getActivitiesForConnection(userActivities, connection.id);
-const completedCount = connectionActivities.filter(activity => activity.status === 'completed').length;
-const totalCount = connectionActivities.length;
-const completionPercentage = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
+                    const completedCount = connectionActivities.filter(activity => activity.status === 'completed').length;
+                    const totalCount = connectionActivities.length;
+                    const completionPercentage = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
                     
                     return (
                       <div 
@@ -1519,8 +1981,8 @@ const completionPercentage = totalCount ? Math.round((completedCount / totalCoun
                             ></div>
                           </div>
                           <div className="text-xs text-gray-500 mt-1">
-  {completedCount} of {totalCount} activities completed
-</div>
+                            {completedCount} of {totalCount} activities completed
+                          </div>
                         </div>
 
                         <div className="space-y-3">
@@ -1576,6 +2038,7 @@ const completionPercentage = totalCount ? Math.round((completedCount / totalCoun
     );
   }
 
+  // Account page
   if (currentPage === 'account') {
     return (
       <>
@@ -1609,7 +2072,8 @@ const completionPercentage = totalCount ? Math.round((completedCount / totalCoun
                       </div>
                       
                       <div>
-                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                        <label className="
+                        block text-sm font-medium text-gray-900 mb-2">
                           Email Address
                         </label>
                         <input
@@ -1719,7 +2183,7 @@ const completionPercentage = totalCount ? Math.round((completedCount / totalCoun
     );
   }
 
-  // Home Page (default)
+  // Home page (default)
   return (
     <div className="min-h-screen bg-gray-50">
       {showFrequencyModal && <FrequencyModal />}
@@ -1786,7 +2250,8 @@ const completionPercentage = totalCount ? Math.round((completedCount / totalCoun
             <h2 className="text-4xl font-bold text-gray-900 mb-4">How TinyNudge Works</h2>
             <p className="text-gray-600 text-lg">Simple steps to stronger relationships</p>
           </div>
-<div className="mb-16">
+
+          <div className="mb-16">
             <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-200 max-w-xl mx-auto">
               <div className="aspect-video bg-gray-100 rounded-2xl overflow-hidden shadow-inner mb-6">
                 <video 
@@ -1807,6 +2272,7 @@ const completionPercentage = totalCount ? Math.round((completedCount / totalCoun
               </div>
             </div>
           </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="text-center group hover:scale-105 transition-transform duration-300">
               <div className="relative mb-4">
@@ -1869,9 +2335,10 @@ const completionPercentage = totalCount ? Math.round((completedCount / totalCoun
               </ul>
               
               <button 
-      onClick={() => setCurrentPage('signin')}
-      className="w-full bg-gray-600 hover:bg-gray-700 text-white font-medium py-3 px-6 rounded-xl transition-colors">
-      Get Started
+                onClick={() => setCurrentPage('signin')}
+                className="w-full bg-gray-600 hover:bg-gray-700 text-white font-medium py-3 px-6 rounded-xl transition-colors"
+              >
+                Get Started
               </button>
             </div>
             
