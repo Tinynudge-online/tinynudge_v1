@@ -69,97 +69,134 @@ useEffect(() => {
   script.src = 'https://accounts.google.com/gsi/client';
   script.async = true;
   script.defer = true;
-  document.head.appendChild(script);
 
-  script.onload = () => {
-  console.log('[Google Sign-In] Script loaded');
-  if (window.google && window.google.accounts) {
- window.handleGoogleSignIn = async (response: any) => {
-  try {
-    console.log('[Google Sign-In] Callback fired', response);
-    
-    // Sign in with Supabase using the Google ID token
-    const { data, error } = await supabase.auth.signInWithIdToken({
-      provider: 'google',
-      token: response.credential,
-    });
+  const onGsiLoaded = () => {
+    console.log('[Google Sign-In] Script loaded');
 
-    if (error) {
-      console.error('[Google Sign-In] Supabase error:', error);
-      alert(`Error signing in with Google: ${(error as Error)?.message || 'Unknown error'}`);
-      setLoading(false);
+    if (!window.google?.accounts?.id) {
+      console.error('[Google Sign-In] google.accounts.id not available');
       return;
     }
 
-    // Use Supabase user data instead of decoding JWT manually
-    const user = data.user;
-    setCurrentPage('dashboard');
-    setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'User');
-    setUser({ 
-      email: user.email || '', 
-      id: user.id,
-      name: user.user_metadata?.name || undefined,
-      picture: user.user_metadata?.picture || undefined
-    });
-    
-    // Load user connections and activities
-    await loadUserConnections(user.id);
-    await loadUserActivities(user.id);
-    
-    sessionStorage.setItem('hasVisited', 'true');
-    
-    // If this is first sign-up from connection selection, add that connection
-    if (selectedConnection && selectedFrequency) {
-      await handleAddConnection(selectedConnection);
-    }
-    
-    alert('Welcome to TinyNudge!');
-    setLoading(false);
-  } catch (error) {
-    console.error('[Google Sign-In] Error processing Google Sign-In:', error);
-    alert('Error signing in with Google');
-    setLoading(false);
-  }
-};
+    // Single stable callback assigned to window so GSI can call it
+    window.handleGoogleSignIn = async (response: any) => {
+      try {
+        console.log('[Google Sign-In] callback', response);
+        setLoading(true);
+
+        if (!response?.credential) {
+          console.error('[Google Sign-In] no credential in response', response);
+          alert('Google did not return a credential. Try again.');
+          setLoading(false);
+          return;
+        }
+
+        if (!navigator.onLine) {
+          alert('You appear to be offline. Check your network connection.');
+          setLoading(false);
+          return;
+        }
+
+        // Quick Supabase reachability check to surface CORS/network issues early
+        try {
+          await supabase.auth.getSession();
+          console.log('[Google Sign-In] Supabase reachable');
+        } catch (err) {
+          console.error('[Google Sign-In] Supabase reachability failed', err);
+          alert('Cannot reach Supabase. Check SUPABASE_URL, anon key and Allowed Origins in Supabase settings.');
+          setLoading(false);
+          return;
+        }
+
+        const { data, error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: response.credential,
+        });
+
+        if (error) {
+          console.error('[Google Sign-In] signInWithIdToken error', error);
+          const msg = (error as any)?.message || String(error);
+          if (msg.includes('Failed to fetch')) {
+            alert('Network/CORS error when contacting Supabase. Inspect DevTools → Network.');
+          } else {
+            alert(`Error signing in with Google: ${msg}`);
+          }
+          setLoading(false);
+          return;
+        }
+
+        const user = data.user;
+        if (!user) {
+          console.error('[Google Sign-In] no user returned', data);
+          alert('Sign in failed: no user information returned.');
+          setLoading(false);
+          return;
+        }
+
+        // Post-login flow
+        setCurrentPage('dashboard');
+        setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'User');
+        setUser({
+          email: user.email || '',
+          id: user.id,
+          name: user.user_metadata?.name || undefined,
+          picture: user.user_metadata?.picture || undefined
+        });
+
+        await loadUserConnections(user.id);
+        await loadUserActivities(user.id);
+        sessionStorage.setItem('hasVisited', 'true');
+
+        if (selectedConnection && selectedFrequency) {
+          await handleAddConnection(selectedConnection);
+        }
+
+        alert('Welcome to TinyNudge!');
+      } catch (err) {
+        console.error('[Google Sign-In] unexpected error', err);
+        alert('Error signing in with Google. See console for details.');
+      } finally {
+        setLoading(false);
+      }
+    };
 
     try {
-  window.google.accounts.id.initialize({
-    client_id: GOOGLE_CLIENT_ID,
-    callback: window.handleGoogleSignIn,
-    auto_select: false,
-    cancel_on_tap_outside: false
-  });
-} catch (error) {
-  console.error('[Google Sign-In] Initialization error:', error);
-}
-    } else {
-      console.error('[Google Sign-In] window.google not available after script load');
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: window.handleGoogleSignIn,
+        auto_select: false,
+        cancel_on_tap_outside: true,
+        itp_support: true
+      });
+      console.log('[Google Sign-In] initialized');
+
+      // Render button into fallback div if present
+      const btn = document.getElementById('google-signin-button');
+      if (btn) {
+        try {
+          window.google.accounts.id.renderButton(btn, { theme: 'outline', size: 'large' });
+        } catch (renderErr) {
+          console.warn('[Google Sign-In] renderButton failed', renderErr);
+        }
+      }
+    } catch (initErr) {
+      console.error('[Google Sign-In] initialize error', initErr);
     }
   };
+
+  script.onload = onGsiLoaded;
+  script.onerror = (e) => console.error('[Google Sign-In] script load error', e);
+  document.head.appendChild(script);
 
   return () => {
-    if (document.head.contains(script)) {
-      document.head.removeChild(script);
-    }
+    script.onload = null;
+    script.onerror = null;
+    if (document.head.contains(script)) document.head.removeChild(script);
+    try { delete (window as any).handleGoogleSignIn; } catch {}
   };
 }, []);
 
-useEffect(() => {
-  // Render the Google button after the DOM is ready and script is loaded
-  const buttonEl = document.getElementById('google-signin-button');
-  if (window.google && buttonEl) {
-    window.google.accounts.id.renderButton(
-      buttonEl,
-      { 
-        theme: 'outline', 
-        size: 'large',
-        type: 'standard',
-        text: 'continue_with'
-      }
-    );
-    console.log('[Google Sign-In] Button rendered (post-mount)');
-  }
-}, []);
+
   // State management
   const [currentPage, setCurrentPage] = useState('home');
   const [showPassword, setShowPassword] = useState(false);
@@ -180,13 +217,6 @@ useEffect(() => {
   const [userActivities, setUserActivities] = useState<Activity[]>([]);
   const [lastActivitiesLoad, setLastActivitiesLoad] = useState<string | null>(null);
   const [activityTemplates] = useState<Record<string, string[]>>({
-  'Partner': [
-    'Send a heartfelt good morning text',
-    'Plan a surprise date night',
-    'Cook their favorite meal together',
-    'Write a love note and hide it somewhere they\'ll find',
-    'Give them a 5-minute shoulder massage'
-  ],
   'Daughter': [
     'Read a bedtime story together',
     'Have a tea party or picnic',
@@ -200,92 +230,7 @@ useEffect(() => {
     'Go on a bike ride',
     'Teach him a new skill',
     'Have a pillow fight'
-  ],
-  'Mom': [
-    'Call her just to say hi',
-    'Send flowers or a card',
-    'Cook her favorite meal',
-    'Look through old photos together',
-    'Ask about her childhood memories'
-  ],
-  'Dad': [
-    'Ask about his day at work',
-    'Watch his favorite sports team together',
-    'Work on a project together',
-    'Share a coffee or tea',
-    'Ask for his advice on something'
-  ],
-  'Friend': [
-    'Send a funny meme that reminds you of them',
-    'Plan a coffee date',
-    'Call them to catch up',
-    'Invite them to try something new together',
-    'Send an encouraging text'
-  ],
-  'Girlfriend': [
-    'Write her a sweet note',
-    'Plan a fun outing together',
-    'Surprise her with her favorite treat',
-    'Share a playlist of songs that remind you of her',
-    'Ask her about her dreams'
-  ],
-  'Boyfriend': [
-    'Send him a motivational message',
-    'Plan a game night',
-    'Cook his favorite meal',
-    'Go for a walk together',
-    'Ask him about his goals'
-  ],
-  'Fiancée': [
-    'Talk about wedding plans',
-    'Share a memory from your relationship',
-    'Plan a date night',
-    'Write a list of things you love about them',
-    'Dream about your future together'
-  ],
-  'Brother': [
-    'Play a video game together',
-    'Share a funny story',
-    'Go for a bike ride',
-    'Help him with a project',
-    'Reminisce about childhood memories'
-  ],
-  'Sister': [
-    'Have a spa day at home',
-    'Share a favorite book',
-    'Go shopping together',
-    'Cook a meal together',
-    'Watch a movie together'
-  ],
-  'Cousin': [
-    'Call to catch up',
-    'Share a family story',
-    'Plan a get-together',
-    'Send a funny meme',
-    'Ask about their hobbies'
-  ],
-  'Relative': [
-    'Send a holiday card',
-    'Share a family recipe',
-    'Call to check in',
-    'Plan a family gathering',
-    'Ask about their favorite memory'
-  ],
-  'Colleague': [
-    'Compliment their work',
-    'Invite them for coffee',
-    'Share a helpful resource',
-    'Ask about their weekend',
-    'Offer help on a project'
-  ],
-  'Roommate': [
-    'Cook a meal together',
-    'Plan a movie night',
-    'Clean a shared space together',
-    'Talk about your day',
-    'Plan a fun outing'
   ]
-  
 });
   // Check if user is returning (using sessionStorage instead of localStorage)
   useEffect(() => {
@@ -395,21 +340,8 @@ const handleConnectionSelect = (connectionType: Connection) => {
   ];
 
   const connections = [
-    { id: 'partner', title: 'Partner', emoji: '😍💕', description: 'Strengthen your romantic bond' },
     { id: 'daughter', title: 'Daughter', emoji: '👧🏻', description: 'Build precious memories together' },
-    { id: 'son', title: 'Son', emoji: '👦🏻', description: 'Create lasting father-son moments' },
-    { id: 'mom', title: 'Mom', emoji: '👩🏻', description: 'Show appreciation for all she does' },
-    { id: 'dad', title: 'Dad', emoji: '👨🏻', description: 'Connect with your father figure' },
-    { id: 'girlfriend', title: 'Girlfriend', emoji: '💕', description: 'Keep the romance alive' },
-    { id: 'boyfriend', title: 'Boyfriend', emoji: '💙', description: 'Deepen your connection' },
-    { id: 'fiancee', title: 'Fiancée', emoji: '💍', description: 'Prepare for your journey together' },
-    { id: 'brother', title: 'Brother', emoji: '👬', description: 'Strengthen sibling bonds' },
-    { id: 'sister', title: 'Sister', emoji: '👭', description: 'Create sisterly connections' },
-    { id: 'friend', title: 'Friend', emoji: '👥', description: 'Nurture lifelong friendships' },
-    { id: 'cousin', title: 'Cousin', emoji: '👫', description: 'Stay connected with family' },
-    { id: 'relative', title: 'Relative', emoji: '🏠', description: 'Build family relationships' },
-    { id: 'colleague', title: 'Colleague', emoji: '💼', description: 'Improve work relationships' },
-    { id: 'roommate', title: 'Roommate', emoji: '🏡', description: 'Create harmony at home' }
+    { id: 'son', title: 'Son', emoji: '👦🏻', description: 'Create lasting father-son moments' }
   ];
 
 // Create activities for a new connection
@@ -797,25 +729,41 @@ const handleUndoSkipActivity = async (activityId: string) => {
 };
   
 const handleGoogleSignIn = () => {
-  if (!window.google) {
-    alert('Google Sign-In is loading, please try again in a moment.');
+  console.log('[Google Sign-In] Button clicked');
+  
+  if (!window.google?.accounts?.id) {
+    alert('Google Sign-In is still loading. Please wait a moment and try again.');
     return;
   }
   
-  setLoading(true);
-  
   try {
-    // Trigger Google Sign-In prompt directly
     window.google.accounts.id.prompt((notification: any) => {
-      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        console.log('Google Sign-In was dismissed or not displayed');
-        setLoading(false);
+      console.log('[Google Sign-In] Prompt notification:', notification);
+      
+      if (notification.isNotDisplayed()) {
+        console.log('[Google Sign-In] Prompt not displayed');
+        // Try rendering the button instead
+        const buttonEl = document.getElementById('google-signin-button');
+        if (buttonEl && window.google?.accounts?.id) {
+          buttonEl.innerHTML = ''; // Clear any existing content
+          window.google.accounts.id.renderButton(
+            buttonEl,
+            { 
+              theme: 'outline', 
+              size: 'large',
+              type: 'standard',
+              text: 'continue_with',
+              width: buttonEl.offsetWidth
+            }
+          );
+        }
+      } else if (notification.isSkippedMoment()) {
+        console.log('[Google Sign-In] User closed the prompt');
       }
     });
   } catch (error) {
-    console.error('Error triggering Google Sign-In:', error);
-    alert('Error with Google Sign-In');
-    setLoading(false);
+    console.error('[Google Sign-In] Error triggering prompt:', error);
+    alert('Error with Google Sign-In. Please try again.');
   }
 };
 
@@ -1338,10 +1286,11 @@ const ActivitiesModal = () => (
 
             <div>
   <div id="google-signin-button" style={{ display: 'block' }}></div>
+   {/* Fallback button */}
   <button 
     onClick={handleGoogleSignIn}
     disabled={loading}
-    className="w-full bg-white hover:bg-gray-50 text-gray-900 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-3 mb-6 transition-colors border border-gray-300 disabled:opacity-50"
+    className="w-full bg-white hover:bg-gray-50 text-gray-900 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-3 transition-colors border border-gray-300 disabled:opacity-50"
   >
     <svg className="w-5 h-5" viewBox="0 0 24 24">
       <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -1349,9 +1298,9 @@ const ActivitiesModal = () => (
       <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
       <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
     </svg>
-    {loading ? 'Loading...' : 'Continue with Google 🚀'}
+    {loading ? 'Signing in...' : 'Continue with Google'}
   </button>
- 
+
             </div>
 
             <div className="space-y-4">
