@@ -5,16 +5,6 @@ import {
   loadUserConnections, 
   loadUserActivities 
 } from '../lib/activities';
-// Add Google Sign-In script
-declare global {
-  interface Window {
-    google: any;
-    handleGoogleSignIn: (response: any) => void;
-  }
-}
-// Removed unused import: GoogleAuth
-// Replace with your actual Google Client ID from Google Cloud Console
-const GOOGLE_CLIENT_ID = '601381853625-n8j65mvl61a3irt7pj3gd8pgauk5pdak.apps.googleusercontent.com';
 import React, { useState, useEffect } from 'react';
 import { Heart, Settings, Star, Eye, EyeOff, X, Plus, Pause, Play, Trash2 } from 'lucide-react';
 
@@ -65,135 +55,32 @@ interface Activity {
 export default function Page() {
 // Load Google Sign-In script
 useEffect(() => {
-  const script = document.createElement('script');
-  script.src = 'https://accounts.google.com/gsi/client';
-  script.async = true;
-  script.defer = true;
-
-  const onGsiLoaded = () => {
-    console.log('[Google Sign-In] Script loaded');
-
-    if (!window.google?.accounts?.id) {
-      console.error('[Google Sign-In] google.accounts.id not available');
-      return;
-    }
-
-    // Single stable callback assigned to window so GSI can call it
-    window.handleGoogleSignIn = async (response: any) => {
-      try {
-        console.log('[Google Sign-In] callback', response);
-        setLoading(true);
-
-        if (!response?.credential) {
-          console.error('[Google Sign-In] no credential in response', response);
-          alert('Google did not return a credential. Try again.');
-          setLoading(false);
-          return;
-        }
-
-        if (!navigator.onLine) {
-          alert('You appear to be offline. Check your network connection.');
-          setLoading(false);
-          return;
-        }
-
-        // Quick Supabase reachability check to surface CORS/network issues early
-        try {
-          await supabase.auth.getSession();
-          console.log('[Google Sign-In] Supabase reachable');
-        } catch (err) {
-          console.error('[Google Sign-In] Supabase reachability failed', err);
-          alert('Cannot reach Supabase. Check SUPABASE_URL, anon key and Allowed Origins in Supabase settings.');
-          setLoading(false);
-          return;
-        }
-
-        const { data, error } = await supabase.auth.signInWithIdToken({
-          provider: 'google',
-          token: response.credential,
-        });
-
-        if (error) {
-          console.error('[Google Sign-In] signInWithIdToken error', error);
-          const msg = (error as any)?.message || String(error);
-          if (msg.includes('Failed to fetch')) {
-            alert('Network/CORS error when contacting Supabase. Inspect DevTools → Network.');
-          } else {
-            alert(`Error signing in with Google: ${msg}`);
-          }
-          setLoading(false);
-          return;
-        }
-
-        const user = data.user;
-        if (!user) {
-          console.error('[Google Sign-In] no user returned', data);
-          alert('Sign in failed: no user information returned.');
-          setLoading(false);
-          return;
-        }
-
-        // Post-login flow
-        setCurrentPage('dashboard');
-        setUserName(user.user_metadata?.name || user.email?.split('@')[0] || 'User');
-        setUser({
-          email: user.email || '',
-          id: user.id,
-          name: user.user_metadata?.name || undefined,
-          picture: user.user_metadata?.picture || undefined
-        });
-
-        await loadUserConnections(user.id);
-        await loadUserActivities(user.id);
-        sessionStorage.setItem('hasVisited', 'true');
-
-        if (selectedConnection && selectedFrequency) {
-          await handleAddConnection(selectedConnection);
-        }
-
-        alert('Welcome to TinyNudge!');
-      } catch (err) {
-        console.error('[Google Sign-In] unexpected error', err);
-        alert('Error signing in with Google. See console for details.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
+  const cleanup = async () => {
     try {
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: window.handleGoogleSignIn,
-        auto_select: false,
-        cancel_on_tap_outside: true,
-        itp_support: true
-      });
-      console.log('[Google Sign-In] initialized');
-
-      // Render button into fallback div if present
-      const btn = document.getElementById('google-signin-button');
-      if (btn) {
-        try {
-          window.google.accounts.id.renderButton(btn, { theme: 'outline', size: 'large' });
-        } catch (renderErr) {
-          console.warn('[Google Sign-In] renderButton failed', renderErr);
-        }
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+      if (error) {
+        console.warn('[Auth] session check error', error);
       }
-    } catch (initErr) {
-      console.error('[Google Sign-In] initialize error', initErr);
+      if (session?.user) {
+        setUser({
+          email: session.user.email || '',
+          id: session.user.id,
+          name: session.user.user_metadata?.name || undefined,
+          picture: session.user.user_metadata?.picture || undefined,
+        });
+        setUserName(session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User');
+        setCurrentPage('dashboard');
+        await loadUserConnections(session.user.id);
+        await loadUserActivities(session.user.id);
+      }
+    } catch (error) {
+      console.error('[Auth] failed to validate session', error);
     }
   };
-
-  script.onload = onGsiLoaded;
-  script.onerror = (e) => console.error('[Google Sign-In] script load error', e);
-  document.head.appendChild(script);
-
-  return () => {
-    script.onload = null;
-    script.onerror = null;
-    if (document.head.contains(script)) document.head.removeChild(script);
-    try { delete (window as any).handleGoogleSignIn; } catch {}
-  };
+  cleanup();
 }, []);
 
 
@@ -728,42 +615,30 @@ const handleUndoSkipActivity = async (activityId: string) => {
   }
 };
   
-const handleGoogleSignIn = () => {
-  console.log('[Google Sign-In] Button clicked');
-  
-  if (!window.google?.accounts?.id) {
-    alert('Google Sign-In is still loading. Please wait a moment and try again.');
-    return;
-  }
-  
+const handleGoogleSignIn = async () => {
+  setLoading(true);
+
   try {
-    window.google.accounts.id.prompt((notification: any) => {
-      console.log('[Google Sign-In] Prompt notification:', notification);
-      
-      if (notification.isNotDisplayed()) {
-        console.log('[Google Sign-In] Prompt not displayed');
-        // Try rendering the button instead
-        const buttonEl = document.getElementById('google-signin-button');
-        if (buttonEl && window.google?.accounts?.id) {
-          buttonEl.innerHTML = ''; // Clear any existing content
-          window.google.accounts.id.renderButton(
-            buttonEl,
-            { 
-              theme: 'outline', 
-              size: 'large',
-              type: 'standard',
-              text: 'continue_with',
-              width: buttonEl.offsetWidth
-            }
-          );
-        }
-      } else if (notification.isSkippedMoment()) {
-        console.log('[Google Sign-In] User closed the prompt');
-      }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}`,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
     });
+
+    if (error) {
+      console.error('[Google Sign-In] OAuth redirect error', error);
+      alert(`Google sign-in failed: ${error.message}`);
+      setLoading(false);
+    }
   } catch (error) {
-    console.error('[Google Sign-In] Error triggering prompt:', error);
-    alert('Error with Google Sign-In. Please try again.');
+    console.error('[Google Sign-In] unexpected error', error);
+    alert('Google sign-in failed. Check console for details.');
+    setLoading(false);
   }
 };
 
@@ -1285,8 +1160,7 @@ const ActivitiesModal = () => (
             </div>
 
             <div>
-  <div id="google-signin-button" style={{ display: 'block' }}></div>
-   {/* Fallback button */}
+  {/* Google sign-in redirect button */}
   <button 
     onClick={handleGoogleSignIn}
     disabled={loading}
