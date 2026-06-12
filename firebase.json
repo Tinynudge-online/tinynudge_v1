@@ -1,0 +1,25 @@
+{
+  "hosting": {
+    "source": ".",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "frameworksBackend": {
+      "region": "us-central1",
+      "secrets": [
+        "LEMONSQUEEZY_API_KEY",
+        "LEMONSQUEEZY_WEBHOOK_SECRET",
+        "SERVICE_ACCOUNT_KEY"
+      ],
+      "environmentVariables": {
+        "LEMONSQUEEZY_STORE_ID": "204751",
+        "LEMONSQUEEZY_VARIANT_ID": "914209"
+      }
+    }
+  },
+  "functions": {
+    "source": "functions"
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

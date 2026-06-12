@@ -1,0 +1,27 @@
+runConfig:
+  minInstances: 0
+  maxInstances: 10
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: LOOPS_API_KEY
+    secret: LOOPS_API_KEY
+  - variable: SERVICE_ACCOUNT_KEY
+    secret: SERVICE_ACCOUNT_KEY
+  - variable: CRON_SECRET
+    secret: CRON_SECRET
+  - variable: LEMONSQUEEZY_API_KEY
+    secret: LEMONSQUEEZY_API_KEY
+  - variable: LEMONSQUEEZY_STORE_ID
+    secret: LEMONSQUEEZY_STORE_ID
+  - variable: LEMONSQUEEZY_VARIANT_ID
+    secret: LEMONSQUEEZY_VARIANT_ID
+  - variable: LEMONSQUEEZY_WEBHOOK_SECRET
+    secret: LEMONSQUEEZY_WEBHOOK_SECRET
+  - variable: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    value: 601381853625-n8j65mvl61a3irt7pj3gd8pgauk5pdak.apps.googleusercontent.com
+    availability:
+      - BUILD
+      - RUNTIME
