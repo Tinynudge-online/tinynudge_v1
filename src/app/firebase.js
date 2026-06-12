@@ -3,16 +3,9 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getAnalytics } from "firebase/analytics";
 
-const getAuthDomain = () => {
-  if (typeof window === 'undefined') return 'tinynudge-38b25.firebaseapp.com'
-  const hostname = window.location.hostname
-  if (hostname === 'www.tinynudge.online') return 'www.tinynudge.online'
-  return 'tinynudge-38b25.firebaseapp.com'
-}
-
 const firebaseConfig = {
   apiKey: "AIzaSyCdOs4Et9B--kZQLpbMaTKAgnsLrBlSBBo",
-  authDomain: getAuthDomain(),
+  authDomain: "tinynudge-38b25.firebaseapp.com",
   projectId: "tinynudge-38b25",
   storageBucket: "tinynudge-38b25.firebasestorage.app",
   messagingSenderId: "169555706895",
