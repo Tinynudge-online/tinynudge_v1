@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing signature' }, { status: 400 });
   }
 
-  const digest = createHmac('sha256', process.env.LEMONSQUEEZY_WEBHOOK_SECRET!)
+  const digest = createHmac('sha256', process.env.LEMONSQUEEZY_WEBHOOK_SECRET!.trim())
     .update(rawBody)
     .digest('hex');
 

@@ -8,11 +8,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'email and userId are required' }, { status: 400 });
   }
 
-  lemonSqueezySetup({ apiKey: process.env.LEMONSQUEEZY_API_KEY! });
+  const apiKey = process.env.LEMONSQUEEZY_API_KEY!.trim();
+  const storeId = process.env.LEMONSQUEEZY_STORE_ID!.replace(/[﻿\s]/g, '');
+  const variantId = process.env.LEMONSQUEEZY_VARIANT_ID!.replace(/[﻿\s]/g, '');
+
+  lemonSqueezySetup({ apiKey });
 
   const { data, error } = await createCheckout(
-    process.env.LEMONSQUEEZY_STORE_ID!,
-    process.env.LEMONSQUEEZY_VARIANT_ID!,
+    storeId,
+    variantId,
     {
       checkoutData: {
         email,
