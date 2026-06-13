@@ -631,8 +631,8 @@ const Page = () => {
         });
       }
     } catch (error: any) {
-      console.error('Google sign-in error:', error);
       if (error.code !== 'auth/popup-closed-by-user') {
+        console.error('Google sign-in error:', error);
         alert('Error signing in with Google. Please try again.');
       }
     } finally {
