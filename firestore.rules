@@ -12,5 +12,12 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == resource.data.user_id;
       allow create: if request.auth != null && request.auth.uid == request.resource.data.user_id;
     }
+    match /user_preferences/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /daily_stats/{dateId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
   }
 }

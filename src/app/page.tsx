@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, Settings, Star, Eye, EyeOff, X, Plus, Pause, Play, Trash2 } from 'lucide-react';
+import { Heart, Settings, Star, Eye, EyeOff, X, Plus, Pause, Play, Trash2, ArrowLeft } from 'lucide-react';
+import { getNudgesByRelationship, getNudgeById, type RelationshipType } from '../data/nudges';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -22,6 +23,7 @@ import {
   updateDoc,
   doc,
   writeBatch,
+  increment,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 
@@ -53,6 +55,7 @@ interface Activity {
   id: string;
   connection_id: string;
   user_id: string;
+  nudge_id?: string;
   title: string;
   description: string;
   status: 'active' | 'completed' | 'skipped' | 'paused';
@@ -110,9 +113,9 @@ interface Frequency {
 // ============================================================================
 
 const CONNECTION_TYPES: ConnectionType[] = [
+  { title: 'Son', emoji: '👦', description: 'Your son (under 10)' },
+  { title: 'Daughter', emoji: '👧', description: 'Your daughter (under 10)' },
   { title: 'Partner', emoji: '💑', description: 'Romantic partner' },
-  { title: 'Daughter', emoji: '👧', description: 'Your daughter' },
-  { title: 'Son', emoji: '👦', description: 'Your son' },
   { title: 'Mom', emoji: '👩', description: 'Your mother' },
   { title: 'Dad', emoji: '👨', description: 'Your father' },
   { title: 'Friend', emoji: '🤝', description: 'Close friend' },
@@ -126,6 +129,8 @@ const CONNECTION_TYPES: ConnectionType[] = [
   { title: 'Colleague', emoji: '💼', description: 'Work colleague' },
   { title: 'Roommate', emoji: '🏠', description: 'Roommate' },
 ];
+
+const LIVE_CONNECTION_TITLES = new Set(['Son', 'Daughter']);
 
 const FREQUENCIES: Frequency[] = [
   {
@@ -295,24 +300,53 @@ async function loadUserActivities(userId: string): Promise<Activity[]> {
 async function createActivitiesForConnection(
   connectionId: string,
   connectionTitle: string,
-  userId: string
+  userId: string,
+  count: number = 5
 ): Promise<Activity[]> {
-  const templates = activityTemplates[connectionTitle] || activityTemplates['Friend'];
   const now = new Date().toISOString();
   const created: Activity[] = [];
-  for (const template of templates) {
-    const data = {
-      connection_id: connectionId,
-      user_id: userId,
-      title: template,
-      description: `A meaningful way to connect with your ${connectionTitle.toLowerCase()}`,
-      status: 'active' as const,
-      created_at: now,
-      completed_at: null,
-    };
-    const ref = await addDoc(collection(db, 'user_activities'), data);
-    created.push({ id: ref.id, ...data });
+
+  const CONNECTION_TITLE_TO_RELATIONSHIP: Partial<Record<string, RelationshipType>> = {
+    'Son': 'son-under-10',
+    'Daughter': 'daughter-under-10',
+  };
+  const relationshipType = CONNECTION_TITLE_TO_RELATIONSHIP[connectionTitle];
+  const nudgePool = relationshipType ? getNudgesByRelationship(relationshipType) : null;
+
+  if (nudgePool && nudgePool.length > 0) {
+    const shuffled = [...nudgePool].sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, Math.min(count, nudgePool.length));
+    for (const nudge of selected) {
+      const data = {
+        connection_id: connectionId,
+        user_id: userId,
+        nudge_id: nudge.id,
+        title: nudge.title,
+        description: nudge.description,
+        status: 'active' as const,
+        created_at: now,
+        completed_at: null,
+      };
+      const ref = await addDoc(collection(db, 'user_activities'), data);
+      created.push({ id: ref.id, ...data });
+    }
+  } else {
+    const templates = activityTemplates[connectionTitle] || activityTemplates['Friend'];
+    for (const template of templates) {
+      const data = {
+        connection_id: connectionId,
+        user_id: userId,
+        title: template,
+        description: `A meaningful way to connect with your ${connectionTitle.toLowerCase()}`,
+        status: 'active' as const,
+        created_at: now,
+        completed_at: null,
+      };
+      const ref = await addDoc(collection(db, 'user_activities'), data);
+      created.push({ id: ref.id, ...data });
+    }
   }
+
   return created;
 }
 
@@ -420,6 +454,12 @@ function generateScratchReward(): ScratchReward {
 // MAIN PAGE COMPONENT
 // ============================================================================
 
+function getActivityCount(plan: UserPlan): number {
+  if (plan.plan === 'premium') return 50;
+  if (plan.plan === 'trial' && plan.trialEndDate && new Date() <= new Date(plan.trialEndDate)) return 50;
+  return 5;
+}
+
 const Page = () => {
   const [authLoading, setAuthLoading] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -449,6 +489,8 @@ const Page = () => {
   const [showFrequencyModal, setShowFrequencyModal] = useState(false);
   const [showAddConnectionModal, setShowAddConnectionModal] = useState(false);
   const [showActivitiesModal, setShowActivitiesModal] = useState(false);
+  const [currentActivityIndex, setCurrentActivityIndex] = useState(0);
+  const [nudgesTodayCount, setNudgesTodayCount] = useState(0);
 
   const pendingConnectionRef = useRef<{ connection: ConnectionType; frequency: Frequency } | null>(null);
 
@@ -540,7 +582,7 @@ const Page = () => {
               created_at: now,
             };
             const connRef = await addDoc(collection(db, 'user_connections'), connData);
-            await createActivitiesForConnection(connRef.id, connection.title, firebaseUser.uid);
+            await createActivitiesForConnection(connRef.id, connection.title, firebaseUser.uid, getActivityCount(plan));
             const planUpdates = { connectionCount: plan.connectionCount + 1, nudgeCount: plan.nudgeCount + 5 };
             await updateUserPlan(firebaseUser.uid, planUpdates);
             plan = { ...plan, ...planUpdates };
@@ -592,8 +634,17 @@ const Page = () => {
   // ============================================================================
 
   const handleConnectionSelect = (connectionType: ConnectionType) => {
+    if (!LIVE_CONNECTION_TITLES.has(connectionType.title)) return;
     setSelectedConnection(connectionType);
-    setShowFrequencyModal(true);
+    const defaultFrequency = FREQUENCIES[0];
+    setSelectedFrequency(defaultFrequency);
+    pendingConnectionRef.current = { connection: connectionType, frequency: defaultFrequency };
+    setLoading(true);
+    setTimeout(() => {
+      setLoading(false);
+      setAuthTab('signup');
+      setCurrentPage('signin');
+    }, 3000);
   };
 
   const handleFrequencySelect = (frequency: Frequency) => {
@@ -768,7 +819,7 @@ const Page = () => {
         created_at: now,
       };
       const connRef = await addDoc(collection(db, 'user_connections'), connData);
-      await createActivitiesForConnection(connRef.id, connectionType.title, user.id);
+      await createActivitiesForConnection(connRef.id, connectionType.title, user.id, userPlan ? getActivityCount(userPlan) : 5);
       const [newConns, newActs] = await Promise.all([
         loadUserConnections(user.id),
         loadUserActivities(user.id),
@@ -855,8 +906,59 @@ const Page = () => {
     if (!user?.id) return;
     setSelectedActivityConnection(connection);
     const loaded = await loadUserActivities(user.id);
-    setUserActivities(loaded);
-    setActivities(loaded.filter(a => a.connection_id === connection.id));
+    let connActivities = loaded.filter(a => a.connection_id === connection.id);
+
+    // Top up to full allocation for trial/premium users with existing connections
+    const targetCount = userPlan ? getActivityCount(userPlan) : 5;
+    if (connActivities.length < targetCount) {
+      const CONNECTION_TITLE_TO_RELATIONSHIP: Partial<Record<string, RelationshipType>> = {
+        'Son': 'son-under-10',
+        'Daughter': 'daughter-under-10',
+      };
+      const relationshipType = CONNECTION_TITLE_TO_RELATIONSHIP[connection.title];
+      if (relationshipType) {
+        const existingNudgeIds = new Set(connActivities.map(a => a.nudge_id).filter(Boolean) as string[]);
+        const allNudges = getNudgesByRelationship(relationshipType);
+        const toAdd = allNudges
+          .filter(n => !existingNudgeIds.has(n.id))
+          .slice(0, targetCount - connActivities.length);
+        if (toAdd.length > 0) {
+          const now = new Date().toISOString();
+          const newActivities: Activity[] = [];
+          const batch = writeBatch(db);
+          for (const nudge of toAdd) {
+            const ref = doc(collection(db, 'user_activities'));
+            const data = {
+              connection_id: connection.id,
+              user_id: user.id,
+              nudge_id: nudge.id,
+              title: nudge.title,
+              description: nudge.description,
+              status: 'active' as const,
+              created_at: now,
+              completed_at: null,
+            };
+            batch.set(ref, data);
+            newActivities.push({ id: ref.id, ...data });
+          }
+          await batch.commit();
+          connActivities = [...connActivities, ...newActivities];
+          setUserActivities([...loaded, ...newActivities]);
+        } else {
+          setUserActivities(loaded);
+        }
+      } else {
+        setUserActivities(loaded);
+      }
+    } else {
+      setUserActivities(loaded);
+    }
+
+    setActivities(connActivities);
+    setCurrentActivityIndex(0);
+    const today = new Date().toISOString().split('T')[0];
+    const statsSnap = await getDoc(doc(db, 'daily_stats', today));
+    setNudgesTodayCount(statsSnap.exists() ? (statsSnap.data().nudgeCount ?? 0) : 0);
     setShowActivitiesModal(true);
   };
 
@@ -865,6 +967,9 @@ const Page = () => {
     const completedActivity = userActivities.find(a => a.id === activityId);
     try {
       await updateActivityStatus(activityId, 'completed');
+      const today = new Date().toISOString().split('T')[0];
+      await setDoc(doc(db, 'daily_stats', today), { nudgeCount: increment(1) }, { merge: true });
+      setNudgesTodayCount(prev => prev + 1);
       const now = new Date().toISOString();
       setUserActivities(prev => prev.map(a => a.id === activityId ? { ...a, status: 'completed', completed_at: now } : a));
       const updatedActivities = activities.map(a => a.id === activityId ? { ...a, status: 'completed' as Activity['status'], completed_at: now } : a);
@@ -1084,123 +1189,302 @@ const Page = () => {
           <p className="text-gray-600">Choose someone you'd like to strengthen your relationship with</p>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          {CONNECTION_TYPES.map((connection, index) => (
-            <button
-              key={index}
-              onClick={() => handleAddConnection(connection)}
-              className="bg-gray-50 rounded-2xl p-6 shadow-lg border border-gray-200 hover:shadow-xl hover:scale-105 transition-all duration-200 text-center"
-            >
-              <div className="text-4xl mb-3">{connection.emoji}</div>
-              <h3 className="font-semibold text-gray-900 mb-2">{connection.title}</h3>
-              <p className="text-sm text-gray-600">{connection.description}</p>
-            </button>
-          ))}
+          {CONNECTION_TYPES.map((connection, index) => {
+            const isLive = LIVE_CONNECTION_TITLES.has(connection.title);
+            return isLive ? (
+              <button
+                key={index}
+                onClick={() => handleAddConnection(connection)}
+                className="bg-gray-50 rounded-2xl p-6 shadow-lg border border-gray-200 hover:shadow-xl hover:scale-105 transition-all duration-200 text-center"
+              >
+                <div className="text-4xl mb-3">{connection.emoji}</div>
+                <h3 className="font-semibold text-gray-900 mb-2">{connection.title}</h3>
+                <p className="text-sm text-gray-600">{connection.description}</p>
+              </button>
+            ) : (
+              <div
+                key={index}
+                className="bg-gray-50 rounded-2xl p-6 shadow-lg border border-gray-200 text-center opacity-50 cursor-not-allowed relative"
+              >
+                <div className="text-4xl mb-3 grayscale">{connection.emoji}</div>
+                <h3 className="font-semibold text-gray-500 mb-2">{connection.title}</h3>
+                <p className="text-xs text-gray-400 font-medium">Coming Soon</p>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 
-  const ActivitiesModal = () => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl p-4 sm:p-8 max-w-xs sm:max-w-2xl w-full shadow-2xl relative max-h-[80vh] overflow-y-auto" style={{ minWidth: '320px' }}>
-        <button
-          onClick={() => setShowActivitiesModal(false)}
-          className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
-        >
-          <X className="w-6 h-6" />
-        </button>
-        <div className="text-center mb-4 sm:mb-8">
-          <div className="text-3xl sm:text-4xl mb-2 sm:mb-3">{selectedActivityConnection?.emoji}</div>
-          <h3 className="text-lg sm:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">
-            Activities for {selectedActivityConnection?.title}
-          </h3>
-          <p className="text-xs sm:text-sm text-gray-600">Choose activities to strengthen your connection</p>
+  const CATEGORY_CONFIG: Record<string, { label: string; pill: string }> = {
+    touch: { label: 'Touch & Connect', pill: 'bg-pink-500' },
+    play:  { label: 'Play Together',   pill: 'bg-purple-500' },
+    talk:  { label: 'Talk & Connect',  pill: 'bg-blue-500' },
+    move:  { label: 'Get Moving',      pill: 'bg-green-500' },
+    calm:  { label: 'Wind Down',       pill: 'bg-indigo-500' },
+  };
+  const TIME_LABELS: Record<string, string> = { quick: '5 mins', medium: '15 mins', long: '30+ mins' };
+
+  const ActivitiesModal = () => {
+    if (activities.length === 0) {
+      return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-xl">
+            <p className="text-gray-500 mb-4">No nudges yet for this connection.</p>
+            <button onClick={() => setShowActivitiesModal(false)} className="text-gray-400 text-sm">Close</button>
+          </div>
         </div>
-        <div className="space-y-3 sm:space-y-4">
-          {activities.map((activity) => (
-            <div
-              key={activity.id}
-              className={`p-3 sm:p-6 rounded-xl sm:rounded-2xl border-2 transition-all duration-200 text-sm sm:text-base ${
-                activity.status === 'completed'
-                  ? 'bg-green-50 border-green-200'
-                  : activity.status === 'skipped'
-                  ? 'bg-gray-100 border-gray-300 opacity-60'
-                  : activity.status === 'paused'
-                  ? 'bg-yellow-50 border-yellow-200'
-                  : 'bg-gray-50 border-gray-200'
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <h4 className="font-semibold text-gray-900 mb-2">{activity.title}</h4>
-                  <p className="text-sm text-gray-600 mb-4">{activity.description}</p>
-                </div>
-                {activity.status === 'completed' && (
-                  <div className="text-green-500 ml-4"><Star className="w-6 h-6 fill-current" /></div>
-                )}
-                {activity.status === 'skipped' && (
-                  <div className="text-gray-500 ml-4"><span className="text-sm font-medium">Skipped</span></div>
-                )}
-                {activity.status === 'paused' && (
-                  <div className="text-yellow-500 ml-4"><Pause className="w-5 h-5" /></div>
-                )}
-              </div>
-              {activity.status === 'active' && (
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => handleCompleteActivity(activity.id)}
-                    className="flex-1 bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-4 rounded-xl transition-colors"
-                  >
-                    Complete
-                  </button>
-                  <button
-                    onClick={() => handleSkipActivity(activity.id)}
-                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-xl transition-colors"
-                  >
-                    Skip
-                  </button>
-                </div>
-              )}
-              {activity.status === 'skipped' && (
-                <button
-                  onClick={() => handleUndoSkipActivity(activity.id)}
-                  className="w-full bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-xl transition-colors"
-                >
-                  Undo Skip
-                </button>
-              )}
-              {activity.status === 'paused' && (
-                <div className="text-center text-yellow-600 py-2">
-                  <span className="text-sm font-medium">Activity is paused</span>
-                </div>
-              )}
-              {activity.status === 'completed' && activity.completed_at && (
-                <div className="text-center text-green-600 py-2">
-                  <span className="text-xs">Completed: {new Date(activity.completed_at).toLocaleDateString()}</span>
-                </div>
-              )}
-            </div>
-          ))}
-          {activities.length === 0 && (
-            <div className="text-center py-8">
-              <p className="text-gray-500 mb-4">All activities completed!</p>
+      );
+    }
+
+    const activity = activities[currentActivityIndex];
+    const nudge = activity.nudge_id ? getNudgeById(activity.nudge_id) : null;
+    const cat = nudge ? CATEGORY_CONFIG[nudge.category] : null;
+    const timeLabel = nudge ? TIME_LABELS[nudge.timeRequired] : null;
+    const countDisplay = nudgesTodayCount.toLocaleString();
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-0 md:p-6">
+        {/* Modal container: full-screen mobile, compact desktop */}
+        <div className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-4xl md:rounded-2xl md:shadow-2xl overflow-hidden bg-white flex flex-col">
+
+          {/* Nav bar */}
+          <nav className="flex-shrink-0 flex justify-between items-center px-4 md:px-8 py-4 bg-white/80 backdrop-blur-md border-b border-gray-100 z-10">
+            <button onClick={() => setShowActivitiesModal(false)} className="flex items-center gap-2 text-gray-700 hover:opacity-70 transition-opacity active:scale-95">
+              <ArrowLeft className="w-5 h-5" />
+              <span className="text-xs font-bold uppercase tracking-widest hidden sm:inline">Back to Library</span>
+            </button>
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => {
-                  if (selectedActivityConnection && user?.id) {
-                    createActivitiesForConnection(selectedActivityConnection.id, selectedActivityConnection.title, user.id)
-                      .then(() => handleViewActivities(selectedActivityConnection));
-                  }
-                }}
-                className="bg-pink-500 hover:bg-pink-600 text-white font-medium py-2 px-6 rounded-xl transition-colors"
+                onClick={() => setCurrentActivityIndex(prev => Math.max(0, prev - 1))}
+                disabled={currentActivityIndex === 0}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-200 disabled:opacity-25 disabled:cursor-not-allowed active:scale-90 transition-all"
               >
-                Get More Activities
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              {activities.map((a, i) => (
+                <button
+                  key={i}
+                  onClick={() => setCurrentActivityIndex(i)}
+                  className={`rounded-full transition-all duration-200 ${
+                    i === currentActivityIndex ? 'w-5 h-2 bg-pink-500'
+                    : a.status === 'completed' ? 'w-2 h-2 bg-green-400'
+                    : 'w-2 h-2 bg-gray-300'
+                  }`}
+                />
+              ))}
+              <button
+                onClick={() => setCurrentActivityIndex(prev => Math.min(activities.length - 1, prev + 1))}
+                disabled={currentActivityIndex === activities.length - 1}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 hover:bg-gray-200 disabled:opacity-25 disabled:cursor-not-allowed active:scale-90 transition-all"
+              >
+                <ArrowLeft className="w-4 h-4 rotate-180" />
               </button>
             </div>
-          )}
+            <div className="w-20 flex items-center justify-end gap-2">
+              <span className="text-xs text-gray-400 font-medium">{currentActivityIndex + 1} / {activities.length}</span>
+              <button
+                onClick={() => setShowActivitiesModal(false)}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 active:scale-90 transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </nav>
+
+          {/* Body */}
+          <div className="flex flex-1 overflow-hidden">
+
+            {/* Left hero — desktop only, blank for future images */}
+            <section className="hidden md:flex md:w-[42%] flex-shrink-0 relative flex-col">
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+              {activity.status === 'completed' && (
+                <div className="absolute top-4 right-4 bg-green-500 text-white text-xs font-bold px-3 py-1.5 rounded-full z-10">✓ Done</div>
+              )}
+              {activity.status === 'skipped' && (
+                <div className="absolute top-4 right-4 bg-gray-500 text-white text-xs font-bold px-3 py-1.5 rounded-full z-10">Skipped</div>
+              )}
+              <div className="absolute bottom-0 left-0 w-full p-8 text-white z-10">
+                {cat && (
+                  <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-4 ${cat.pill}`}>
+                    <span className="text-xs font-bold uppercase tracking-wider text-white">{cat.label}</span>
+                  </div>
+                )}
+                <h1 className="text-2xl font-bold leading-tight mb-3">{activity.title}</h1>
+                <p className="text-white/75 text-sm leading-relaxed line-clamp-3">{activity.description}</p>
+              </div>
+            </section>
+
+            {/* Right column — scrollable */}
+            <section className="flex-1 overflow-y-auto flex flex-col bg-white">
+
+              {/* Mobile hero */}
+              <div className="md:hidden relative h-52 flex-shrink-0">
+                <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                {activity.status === 'completed' && (
+                  <div className="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">✓ Done</div>
+                )}
+                {activity.status === 'skipped' && (
+                  <div className="absolute top-3 right-3 bg-gray-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">Skipped</div>
+                )}
+                <div className="absolute bottom-4 left-4 right-4">
+                  {cat && <span className={`inline-block ${cat.pill} px-3 py-1 rounded-full text-white text-xs font-bold uppercase tracking-wider mb-2`}>{cat.label}</span>}
+                  <h2 className="text-white text-xl font-bold leading-tight">{activity.title}</h2>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 px-5 md:px-8 py-6 space-y-6 max-w-[520px] mx-auto w-full">
+
+                {/* Meta tags */}
+                {nudge && (
+                  <div className="flex flex-wrap gap-2">
+                    <span className="flex items-center gap-1.5 bg-teal-50 text-teal-700 text-xs font-bold px-3 py-1.5 rounded-full">⏱ {timeLabel}</span>
+                    <span className="flex items-center gap-1.5 bg-rose-50 text-rose-600 text-xs font-bold px-3 py-1.5 rounded-full">
+                      {nudge.effortLevel === 'low' ? '⚡ Low effort' : '💪 High effort'}
+                    </span>
+                    <span className="flex items-center gap-1.5 bg-amber-50 text-amber-700 text-xs font-bold px-3 py-1.5 rounded-full">
+                      {nudge.materialNeeded ? `🎒 ${nudge.materialDescription || 'Materials needed'}` : '✋ No materials'}
+                    </span>
+                  </div>
+                )}
+
+                {/* About */}
+                <div className="space-y-2">
+                  <h2 className="text-lg font-bold text-gray-900">About this Nudge</h2>
+                  <p className="text-gray-500 text-sm leading-relaxed">{activity.description}</p>
+                </div>
+
+                {/* Steps */}
+                {nudge && nudge.steps.length > 0 && (
+                  <div className="space-y-4">
+                    <h2 className="text-lg font-bold text-gray-900">How to do it</h2>
+                    {nudge.steps.map((step, i) => (
+                      <div key={i} className="flex gap-3 items-start">
+                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-teal-600 text-white flex items-center justify-center text-xs font-bold">{i + 1}</div>
+                        <p className="text-gray-700 text-sm leading-relaxed pt-1">{step}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Why it works */}
+                {nudge && (
+                  <div className="bg-teal-50/60 border-l-4 border-teal-600 p-4 rounded-r-xl space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🧠</span>
+                      <h3 className="text-xs font-bold text-teal-700 uppercase tracking-wider">Why this works</h3>
+                    </div>
+                    <p className="text-gray-600 text-sm leading-relaxed italic">"{nudge.whyItWorks}"</p>
+                  </div>
+                )}
+
+                {/* Affiliate */}
+                {nudge?.affiliateProduct && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-0.5">Recommended</p>
+                      <p className="font-semibold text-gray-900 text-sm">{nudge.affiliateProduct}</p>
+                      {nudge.affiliatePrice && <p className="text-amber-600 text-xs mt-0.5">{nudge.affiliatePrice}</p>}
+                    </div>
+                    <span className="text-2xl">🛒</span>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="space-y-3 pt-1">
+                  {activity.status === 'active' && (
+                    <>
+                      <button
+                        onClick={() => handleCompleteActivity(activity.id)}
+                        className="w-full h-14 bg-gradient-to-r from-amber-400 to-yellow-300 text-gray-900 font-bold rounded-full flex items-center justify-center gap-2 shadow-lg shadow-amber-200/60 hover:scale-[1.02] active:scale-95 transition-all"
+                      >
+                        <Star className="w-5 h-5 fill-current" /> Done it
+                      </button>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          onClick={() => handleSkipActivity(activity.id)}
+                          className="h-12 rounded-full border-2 border-teal-200 bg-teal-50 text-teal-700 text-xs font-bold uppercase tracking-wider hover:bg-teal-100 transition-colors active:scale-95"
+                        >
+                          Later
+                        </button>
+                        {currentActivityIndex < activities.length - 1 ? (
+                          <button
+                            onClick={() => setCurrentActivityIndex(prev => prev + 1)}
+                            className="h-12 rounded-full text-gray-400 text-xs font-bold uppercase tracking-wider hover:text-gray-600 transition-colors"
+                          >
+                            Save for another day
+                          </button>
+                        ) : (
+                          <div className="h-12" />
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {activity.status === 'skipped' && (
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => handleUndoSkipActivity(activity.id)}
+                        className="w-full h-14 bg-blue-500 text-white font-bold rounded-full hover:bg-blue-600 active:scale-95 transition-all"
+                      >
+                        Undo Skip
+                      </button>
+                      {currentActivityIndex < activities.length - 1 && (
+                        <button onClick={() => setCurrentActivityIndex(prev => prev + 1)} className="w-full h-12 text-gray-400 text-xs font-bold uppercase tracking-wider">
+                          Next nudge →
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {activity.status === 'completed' && (
+                    <div className="space-y-2">
+                      <div className="text-center py-1">
+                        <span className="text-green-500 font-bold">✓ Great job!</span>
+                        {activity.completed_at && <p className="text-gray-400 text-xs mt-1">Completed {new Date(activity.completed_at).toLocaleDateString()}</p>}
+                      </div>
+                      {currentActivityIndex < activities.length - 1 && (
+                        <button
+                          onClick={() => setCurrentActivityIndex(prev => prev + 1)}
+                          className="w-full h-14 bg-gradient-to-r from-amber-400 to-yellow-300 text-gray-900 font-bold rounded-full hover:scale-[1.02] active:scale-95 transition-all"
+                        >
+                          Next Nudge →
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {activity.status === 'paused' && (
+                    <div className="text-center py-3">
+                      <span className="text-yellow-600 text-sm font-medium">This connection is paused</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Community counter */}
+                <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
+                  <div className="flex -space-x-2">
+                    {['🧑', '👩', '👨'].map((e, i) => (
+                      <div key={i} className="w-8 h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center text-sm">{e}</div>
+                    ))}
+                    <div className="w-8 h-8 rounded-full bg-teal-100 border-2 border-white flex items-center justify-center text-[9px] font-bold text-teal-700">
+                      +{nudgesTodayCount > 999 ? `${(nudgesTodayCount / 1000).toFixed(1)}k` : nudgesTodayCount}
+                    </div>
+                  </div>
+                  <p className="text-xs font-semibold text-gray-400">{countDisplay} parents nudged today</p>
+                </div>
+
+              </div>
+            </section>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const DashboardHeader = () => (
     <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 z-50 flex justify-between items-center px-6 py-4">
@@ -1792,13 +2076,6 @@ const Page = () => {
                         >
                           {connection.is_paused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
                         </button>
-                        <button
-                          onClick={() => handleDeleteConnection(connection.id)}
-                          className="p-2 bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded-xl transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
                     </div>
                   ))}
@@ -2023,17 +2300,29 @@ const Page = () => {
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Choose Your Connection</h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 px-4">
-            {CONNECTION_TYPES.map((connection, index) => (
-              <button
-                key={index}
-                onClick={() => handleConnectionSelect(connection)}
-                className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200 hover:shadow-xl hover:scale-105 transition-all duration-200 text-center"
-              >
-                <div className="text-4xl mb-3">{connection.emoji}</div>
-                <h3 className="font-semibold text-gray-900 mb-2">{connection.title}</h3>
-                <p className="text-sm text-gray-600">{connection.description}</p>
-              </button>
-            ))}
+            {CONNECTION_TYPES.map((connection, index) => {
+              const isLive = LIVE_CONNECTION_TITLES.has(connection.title);
+              return isLive ? (
+                <button
+                  key={index}
+                  onClick={() => handleConnectionSelect(connection)}
+                  className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200 hover:shadow-xl hover:scale-105 transition-all duration-200 text-center"
+                >
+                  <div className="text-4xl mb-3">{connection.emoji}</div>
+                  <h3 className="font-semibold text-gray-900 mb-2">{connection.title}</h3>
+                  <p className="text-sm text-gray-600">{connection.description}</p>
+                </button>
+              ) : (
+                <div
+                  key={index}
+                  className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200 text-center opacity-50 cursor-not-allowed"
+                >
+                  <div className="text-4xl mb-3 grayscale">{connection.emoji}</div>
+                  <h3 className="font-semibold text-gray-500 mb-2">{connection.title}</h3>
+                  <p className="text-xs text-gray-400 font-medium">Coming Soon</p>
+                </div>
+              );
+            })}
           </div>
         </div>
       </main>
