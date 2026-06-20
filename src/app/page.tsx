@@ -1296,9 +1296,17 @@ const Page = () => {
           {/* Body */}
           <div className="flex flex-1 overflow-hidden">
 
-            {/* Left hero — desktop only, blank for future images */}
+            {/* Left hero — desktop only */}
             <section className="hidden md:flex md:w-[42%] flex-shrink-0 relative flex-col">
               <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300" />
+              {nudge && (
+                <img
+                  src={`/nudges/${nudge.id}.png`}
+                  alt={nudge.title}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                />
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
               {activity.status === 'completed' && (
                 <div className="absolute top-4 right-4 bg-green-500 text-white text-xs font-bold px-3 py-1.5 rounded-full z-10">✓ Done</div>
@@ -1323,6 +1331,14 @@ const Page = () => {
               {/* Mobile hero */}
               <div className="md:hidden relative h-52 flex-shrink-0">
                 <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300" />
+                {nudge && (
+                  <img
+                    src={`/nudges/${nudge.id}.png`}
+                    alt={nudge.title}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
                 {activity.status === 'completed' && (
                   <div className="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">✓ Done</div>
