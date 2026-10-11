@@ -6,13 +6,13 @@
       "region": "us-central1",
       "secrets": [
         "LEMONSQUEEZY_API_KEY",
+        "LEMONSQUEEZY_STORE_ID",
+        "LEMONSQUEEZY_VARIANT_ID",
         "LEMONSQUEEZY_WEBHOOK_SECRET",
-        "SERVICE_ACCOUNT_KEY"
-      ],
-      "environmentVariables": {
-        "LEMONSQUEEZY_STORE_ID": "204751",
-        "LEMONSQUEEZY_VARIANT_ID": "914209"
-      }
+        "SERVICE_ACCOUNT_KEY",
+        "LOOPS_API_KEY",
+        "CRON_SECRET"
+      ]
     }
   },
   "functions": {
@@ -21,5 +21,8 @@
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }

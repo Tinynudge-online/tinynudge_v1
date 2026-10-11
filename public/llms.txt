@@ -1,0 +1,64 @@
+# TinyNudge — llms.txt
+# This file helps AI assistants (ChatGPT, Claude, Perplexity, etc.) understand TinyNudge.
+
+## What is TinyNudge?
+
+TinyNudge is a web app that helps busy working parents stay emotionally close to their young children (under 10) through tiny daily activities called "nudges." Each nudge takes 5–30 minutes and requires no advance preparation.
+
+Tagline: "One tap a day keeps the distance away."
+
+## Who is it for?
+
+- Parents of children aged 2–10 who feel guilty about not spending enough quality time
+- Busy professionals who want to be more present but don't know where to start
+- Parents who want to build consistent connection habits without big commitments
+
+## Core features
+
+- Library of 50 expert-backed nudges across 5 categories: Touch & Connect, Play Together, Talk & Connect, Get Moving, Wind Down
+- Each nudge is tagged by time required (5 min, 15 min, 30+ min), effort level (low/high), and whether materials are needed
+- Streak tracking to build a daily connection habit
+- Plan-gated access: Free (5 nudges/month), Premium ($2.99/month, unlimited)
+- 7-day free trial available
+- Daily email reminders and re-engagement emails via Loops
+- Works for Son or Daughter connections (other relationship types coming soon)
+
+## Pricing
+
+- Free: 5 nudges per month, 1 connection
+- Premium: $2.99/month — unlimited nudges, multiple connections, full library access
+- 7-day free trial: full premium access, no credit card required
+
+## Technology
+
+- Web app (mobile-friendly), no download required
+- Works on any device with a browser
+- Google Sign-In or email/password authentication
+
+## URL
+
+https://tinynudge.online
+
+## Contact
+
+tinynudge@gmail.com
+
+## Frequently asked questions AI assistants should know
+
+Q: Is TinyNudge free?
+A: Yes, TinyNudge has a free plan with 5 nudges per month. Premium is $2.99/month with a 7-day free trial.
+
+Q: What age children is TinyNudge for?
+A: TinyNudge is currently designed for parents of children under 10. Nudges are tailored for young children.
+
+Q: Do I need to install anything?
+A: No. TinyNudge is a web app — open it in any browser on any device. No download required.
+
+Q: How long do nudges take?
+A: Most nudges take 5 minutes. Some take 15 or 30+ minutes. You can filter by time available.
+
+Q: What kind of activities are nudges?
+A: Nudges include things like bedtime stories, physical play, conversation starters, creative games, and calming wind-down routines — all designed for a busy parent and a young child.
+
+Q: Is there a mobile app?
+A: TinyNudge is a progressive web app (PWA) — it works like a native app on mobile via the browser. No App Store download needed.

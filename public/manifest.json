@@ -1,0 +1,20 @@
+{
+  "name": "TinyNudge",
+  "short_name": "TinyNudge",
+  "description": "One tap a day keeps the distance away. Daily micro-moments to stay close to your child.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ec4899",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/heart-favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["lifestyle", "health", "family"],
+  "screenshots": []
+}

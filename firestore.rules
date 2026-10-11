@@ -1,23 +1,93 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Clients may read their own document and update non-entitlement,
+    // non-quota fields only. All server-controlled fields are write-protected.
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          // Entitlement / billing fields (written only by webhook / Admin SDK)
+          'plan', 'trialUsed', 'trialStartDate', 'trialEndDate',
+          'lsCustomerId', 'lsSubscriptionId', 'subscriptionStatus',
+          // Quota / reward fields (written only by API routes / Admin SDK)
+          'nudgeCount', 'bonusNudgesEarned', 'scratchCardsAvailable',
+          'streakFreezes', 'extraRelationExpiry', 'connectionCount',
+          'totalActivitiesCompleted', 'lastReEngagedAt', 'trialEndReminderSentAt'
+        ]);
+
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && (!('plan' in request.resource.data) || request.resource.data.plan == 'free')
+        && (!('trialUsed' in request.resource.data) || request.resource.data.trialUsed == false)
+        && (!('nudgeCount' in request.resource.data) || request.resource.data.nudgeCount == 0)
+        && (!('bonusNudgesEarned' in request.resource.data) || request.resource.data.bonusNudgesEarned == 0)
+        && (!('scratchCardsAvailable' in request.resource.data) || request.resource.data.scratchCardsAvailable == 0)
+        && (!('streakFreezes' in request.resource.data) || request.resource.data.streakFreezes == 0)
+        && (!('lsCustomerId' in request.resource.data) || request.resource.data.lsCustomerId == null)
+        && (!('lsSubscriptionId' in request.resource.data) || request.resource.data.lsSubscriptionId == null)
+        && (!('subscriptionStatus' in request.resource.data) || request.resource.data.subscriptionStatus == null);
     }
+
     match /user_connections/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.user_id;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.user_id;
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
+
     match /user_activities/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.user_id;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.user_id;
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
+
+    // Written only via /api/preferences (Admin SDK), which takes the email from
+    // the verified token — scheduled Cloud Functions use it to target Loops emails.
     match /user_preferences/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
     }
+
+    // Global stats are incremented server-side only.
     match /daily_stats/{dateId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /blind_date_entries/{docId} {
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+
+    match /watched_films/{docId} {
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+
+    match /meal_plans/{docId} {
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.user_id == request.auth.uid
+        && request.resource.data.user_id == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
   }
 }
