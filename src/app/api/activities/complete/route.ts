@@ -62,9 +62,19 @@ export async function POST(req: NextRequest) {
       }
 
       const newTotal = (plan.totalActivitiesCompleted ?? 0) + 1;
+      const now = new Date();
       const isPremiumActive = plan.plan === 'premium' ||
-        (plan.plan === 'trial' && !!plan.trialEndDate && new Date() <= new Date(plan.trialEndDate));
+        (plan.plan === 'trial' && !!plan.trialEndDate && now <= new Date(plan.trialEndDate));
       const earnedScratchCard = isPremiumActive && newTotal % 5 === 0;
+
+      // Free-plan monthly nudge limit, enforced here so every client (web, Android,
+      // iOS, or a stale second tab) gets the same answer. Same rule as the app:
+      // 5 nudges plus any bonus nudges, resetting on nudgeResetDate.
+      const resetDue = !!plan.nudgeResetDate && now >= new Date(plan.nudgeResetDate);
+      const usedThisPeriod = resetDue ? 0 : (plan.nudgeCount ?? 0);
+      if (!isPremiumActive && usedThisPeriod >= 5 + (plan.bonusNudgesEarned ?? 0)) {
+        throw Object.assign(new Error('Nudge limit reached'), { code: 'LIMIT_REACHED' });
+      }
 
       const updates: Record<string, unknown> = {
         currentStreak: streak,
@@ -74,7 +84,12 @@ export async function POST(req: NextRequest) {
         totalActivitiesCompleted: newTotal,
         scratchCardsAvailable: (plan.scratchCardsAvailable ?? 0) + (earnedScratchCard ? 1 : 0),
       };
-      if (!isPremiumActive) updates.nudgeCount = (plan.nudgeCount ?? 0) + 1;
+      if (!isPremiumActive) updates.nudgeCount = usedThisPeriod + 1;
+      if (resetDue) {
+        // A session that stayed open across the month boundary: start the new period here.
+        if (isPremiumActive) updates.nudgeCount = 0;
+        updates.nudgeResetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+      }
 
       const completedAt = new Date().toISOString();
       tx.update(activityRef, { status: 'completed', completed_at: completedAt });
@@ -120,6 +135,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     if (err?.code === 'NOT_FOUND') return NextResponse.json({ error: 'Not found' }, { status: 404 });
     if (err?.code === 'ALREADY_COMPLETED') return NextResponse.json({ error: 'Already completed' }, { status: 409 });
+    if (err?.code === 'LIMIT_REACHED') return NextResponse.json({ error: 'limit_reached' }, { status: 403 });
     console.error('activities/complete failed:', err);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }

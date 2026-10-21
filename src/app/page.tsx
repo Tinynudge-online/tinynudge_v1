@@ -39,7 +39,7 @@ import {
   isWebPushSupported,
   isWebPushEnabled,
 } from '@/lib/push-client';
-import { enableNativePush } from '@/lib/native/push';
+import { enableNativePush, disableNativePush, isNativePushRegistered } from '@/lib/native/push';
 import { shareText } from '@/lib/native/share';
 import { tapFeedback } from '@/lib/native/haptics';
 import {
@@ -51,6 +51,7 @@ import { useAppContext, getAppContext, getPurchaseChannel } from '@/lib/app-cont
 import {
   nativeSignInWithGoogle,
   nativeSignInWithApple,
+  nativeSignOut,
   getSignInProviders,
   reauthenticateCurrentUser,
   revokeAppleSignIn,
@@ -62,6 +63,8 @@ import {
   openManageSubscriptions,
 } from '@/lib/native/purchases';
 import { openExternal } from '@/lib/native/browser';
+import SignInMethods from '@/components/SignInMethods';
+import { friendlyAuthMessage } from '@/lib/auth-errors';
 
 // ============================================================================
 // INTERFACES
@@ -480,7 +483,15 @@ async function postPlanApi<T>(path: string, body?: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
     body: JSON.stringify(body ?? {}),
   });
-  if (!res.ok) throw new Error(`${path} failed with status ${res.status}`);
+  if (!res.ok) {
+    // Keep the HTTP status and the server's short error code so callers can react
+    // (e.g. 'limit_reached' opens the upgrade prompt).
+    const body = await res.json().catch(() => null);
+    throw Object.assign(new Error(`${path} failed with status ${res.status}`), {
+      status: res.status,
+      code: typeof body?.error === 'string' ? body.error : undefined,
+    });
+  }
   return res.json();
 }
 
@@ -661,6 +672,10 @@ const Page = () => {
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) { try {
+        // This callback awaits several requests. If the user signs out or switches account
+        // meanwhile, a newer callback owns the screen, so a stale one must not apply state.
+        const signedInUid = firebaseUser.uid;
+        const isStale = () => auth.currentUser?.uid !== signedInUid;
         const userState: UserState = {
           id: firebaseUser.uid,
           email: firebaseUser.email || '',
@@ -752,10 +767,12 @@ const Page = () => {
             '/api/preferences',
             { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }
           );
+          if (isStale()) return;
           setEmailPrefs(preferences);
         } catch (error) {
           console.error('Error loading email preferences:', error);
         }
+        if (isStale()) return;
 
         // The live listeners (below) are the source of truth; only seed state from the
         // one-off load if they haven't delivered their first snapshot yet.
@@ -839,9 +856,11 @@ const Page = () => {
     };
   }, [user?.id]);
 
-  // Real-time listener: sync entitlement fields from Firestore so that a webhook-driven
-  // plan change (e.g. Premium bought on the web, App Store renewal, cancellation expiry,
-  // trial start/end) is reflected live without a page reload.
+  // Real-time listener: keep every account field in sync across the user's devices
+  // (web, Android app, iPhone app, other tabs): plan and billing changes (Premium bought
+  // on the web, App Store renewal, trial start/end) AND the counters another device or a
+  // server job changes (nudges used, streak, scratch cards, bonus nudges, freezes).
+  // connectionCount is excluded: the app derives it from the connection documents.
   useEffect(() => {
     if (!user?.id) return;
     const unsubscribe = onSnapshot(doc(db, 'users', user.id), (snap) => {
@@ -849,12 +868,12 @@ const Page = () => {
       const remote = snap.data() as Partial<UserPlan>;
       setUserPlan(prev => {
         if (!prev) return prev;
-        const entitlementKeys: (keyof UserPlan)[] = [
-          'plan', 'subscriptionStatus', 'lsCustomerId', 'lsSubscriptionId', 'billingSource',
-          'trialStartDate', 'trialEndDate', 'trialUsed',
+        const syncedKeys = [
+          ...(Object.keys(PLAN_DEFAULTS) as (keyof UserPlan)[]).filter(k => k !== 'connectionCount'),
+          'billingSource' as keyof UserPlan,
         ];
         const updates: Partial<UserPlan> = {};
-        for (const k of entitlementKeys) {
+        for (const k of syncedKeys) {
           if (remote[k] !== undefined && remote[k] !== prev[k]) {
             (updates as Record<string, unknown>)[k] = remote[k];
           }
@@ -872,7 +891,10 @@ const Page = () => {
       if (appContext === 'ios-app') {
         const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
         const { receive } = await FirebaseMessaging.checkPermissions();
-        setPushStatus(receive === 'granted' ? 'on' : receive === 'denied' ? 'denied' : 'off');
+        if (receive === 'denied') { setPushStatus('denied'); return; }
+        // 'on' means this device is registered for the signed-in account (the OS permission
+        // alone can come from a previous account on a shared device).
+        setPushStatus(receive === 'granted' && (await isNativePushRegistered()) ? 'on' : 'off');
         return;
       }
       if (!isWebPushSupported()) { setPushStatus('unsupported'); return; }
@@ -920,7 +942,7 @@ const Page = () => {
     setPushBusy(true);
     setPushError(null);
     try {
-      const ok = await disableWebPush();
+      const ok = appContext === 'ios-app' ? await disableNativePush() : await disableWebPush();
       await refreshPushStatus();
       if (!ok) setPushError('Couldn\'t turn off notifications. Please try again.');
     } catch (error) {
@@ -1160,7 +1182,7 @@ const Page = () => {
         if (error?.code === 'auth/popup-blocked') {
           alert('Your browser blocked the Google sign-in window. Please allow pop-ups for this site and try again.');
         } else {
-          alert('Error signing in with Google: ' + error.message);
+          alert(friendlyAuthMessage(error) ?? 'Error signing in with Google: ' + error.message);
         }
       }
     } finally {
@@ -1177,7 +1199,7 @@ const Page = () => {
     } catch (error: any) {
       if (!isAuthCancelled(error)) {
         console.error('Apple sign-in error:', error);
-        alert('Error signing in with Apple: ' + error.message);
+        alert(friendlyAuthMessage(error) ?? 'Error signing in with Apple: ' + error.message);
       }
     } finally {
       setLoading(false);
@@ -1196,7 +1218,7 @@ const Page = () => {
       sessionStorage.setItem('hasVisited', 'true');
     } catch (error: any) {
       console.error('Sign in error:', error);
-      alert(error.message || 'Error signing in. Please check your credentials.');
+      alert(friendlyAuthMessage(error) ?? (error.message || 'Error signing in. Please check your credentials.'));
     } finally {
       setLoading(false);
     }
@@ -1250,18 +1272,32 @@ const Page = () => {
       updateLoopsContact({ currentStreak: 0, lastActiveDate: today }).catch(console.error);
     } catch (error: any) {
       console.error('Sign up error:', error);
-      alert(error.message || 'Error creating account. Please try again.');
+      alert(friendlyAuthMessage(error) ?? (error.message || 'Error creating account. Please try again.'));
     } finally {
       setLoading(false);
     }
   };
 
   const handleSignOut = async () => {
+    // Stop this device's reminders for the account being signed out (needs the sign-in,
+    // so it runs first), so the next person on a shared device doesn't receive them.
+    // Best effort: never block signing out.
+    try {
+      await Promise.race([
+        (appContext === 'ios-app' ? disableNativePush() : disableWebPush()),
+        new Promise(resolve => setTimeout(resolve, 4000)),
+      ]);
+    } catch (error) {
+      console.error('Push cleanup on sign-out failed:', error);
+    }
     try {
       await signOut(auth);
+      await nativeSignOut();
     } catch (error) {
       console.error('Sign out error:', error);
     }
+    setEmailPrefs(DEFAULT_EMAIL_PREFERENCES);
+    setPushStatus('off');
     setUser(null);
     setUserPlan(null);
     setUserName('');
@@ -1539,9 +1575,19 @@ const Page = () => {
         setShareActivity(completedActivity);
         setShowShareModal(true);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error completing activity:', error);
-      alert('Failed to complete activity.');
+      if (error?.status === 403 && error?.code === 'limit_reached') {
+        // The server is the source of truth for the monthly limit (another device may
+        // have used the nudges). Pull the latest counts and show the upgrade prompt.
+        try {
+          const snap = await getDoc(doc(db, 'users', user.id));
+          if (snap.exists()) setUserPlan(prev => (prev ? { ...prev, ...(snap.data() as Partial<UserPlan>), connectionCount: prev.connectionCount } : prev));
+        } catch { /* the live listener will catch up */ }
+        openUpgradeModal('nudge');
+      } else {
+        alert('Failed to complete activity.');
+      }
     } finally {
       completingActivityRef.current = null;
     }
@@ -1952,7 +1998,7 @@ const Page = () => {
           <p className="text-gray-600">Choose someone you'd like to strengthen your relationship with</p>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          {CONNECTION_TYPES.map((connection, index) => {
+          {(appContext === 'ios-app' ? CONNECTION_TYPES.filter(c => LIVE_CONNECTION_TITLES.has(c.title)) : CONNECTION_TYPES).map((connection, index) => {
             const isLive = LIVE_CONNECTION_TITLES.has(connection.title);
             return isLive ? (
               <button
@@ -3335,6 +3381,8 @@ const Page = () => {
                   </div>
                   )}
 
+                  {accountTab === 'profile' && user && <SignInMethods />}
+
                   {accountTab === 'profile' && userPlan && (() => {
                     const trialActive = userPlan.plan === 'trial' && !!userPlan.trialEndDate && new Date() <= new Date(userPlan.trialEndDate);
                     const isPremium = userPlan.plan === 'premium';
@@ -3730,7 +3778,7 @@ const Page = () => {
             '@context': 'https://schema.org',
             '@type': 'WebApplication',
             name: 'TinyNudge',
-            url: 'https://tinynudge.online',
+            url: 'https://www.tinynudge.online',
             description: 'TinyNudge helps busy parents stay close to their young children through tiny daily activities. 50 expert-backed micro-moments, no prep required.',
             applicationCategory: 'LifestyleApplication',
             operatingSystem: 'Any',
@@ -3785,7 +3833,7 @@ const Page = () => {
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Choose Your Connection</h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 px-4">
-            {CONNECTION_TYPES.map((connection, index) => {
+            {(appContext === 'ios-app' ? CONNECTION_TYPES.filter(c => LIVE_CONNECTION_TITLES.has(c.title)) : CONNECTION_TYPES).map((connection, index) => {
               const isLive = LIVE_CONNECTION_TITLES.has(connection.title);
               return isLive ? (
                 <button
