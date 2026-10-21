@@ -10,8 +10,19 @@
     "loops:snapshot": "node --env-file=.env.local scripts/loops/snapshot.mjs"
   },
   "dependencies": {
+    "@apple/app-store-server-library": "3.1.0",
+    "@capacitor-firebase/authentication": "8.5.2",
+    "@capacitor-firebase/messaging": "8.5.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/browser": "8.0.5",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/ios": "8.5.3",
+    "@capacitor/share": "8.0.3",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capgo/native-purchases": "8.9.6",
     "@lemonsqueezy/lemonsqueezy.js": "^4.0.0",
-"firebase": "^12.13.0",
+    "firebase": "^12.13.0",
     "firebase-admin": "^13.10.0",
     "loops": "^6.3.0",
     "lucide-react": "^0.539.0",
@@ -23,6 +34,7 @@
     "lightningcss-linux-x64-gnu": "1.30.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.3",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4.1.11",
     "@types/node": "^20",

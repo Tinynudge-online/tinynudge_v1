@@ -2,6 +2,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // /api/account/delete writes deleted_users/{uid} (Admin SDK only; clients
+    // can't read or write it). ID tokens stay valid for up to an hour after the
+    // account is deleted, so every client create/update also checks this.
+    function notDeleted() {
+      return !exists(/databases/$(database)/documents/deleted_users/$(request.auth.uid));
+    }
+
+    function absentOrNull(field) {
+      return !(field in request.resource.data) || request.resource.data[field] == null;
+    }
+
+    function absentOrZero(field) {
+      return !(field in request.resource.data) || request.resource.data[field] == 0;
+    }
+
     // Clients may read their own document and update non-entitlement,
     // non-quota fields only. All server-controlled fields are write-protected.
     match /users/{userId} {
@@ -9,18 +24,33 @@ service cloud.firestore {
 
       allow update: if request.auth != null
         && request.auth.uid == userId
+        && notDeleted()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           // Entitlement / billing fields (written only by webhook / Admin SDK)
           'plan', 'trialUsed', 'trialStartDate', 'trialEndDate',
-          'lsCustomerId', 'lsSubscriptionId', 'subscriptionStatus',
+          'lsCustomerId', 'lsSubscriptionId', 'subscriptionStatus', 'billingSource',
+          // Apple in-app purchase fields (written only by /api/apple/* routes)
+          'appleAccountToken', 'appleOriginalTransactionId', 'appleExpiresAt',
+          'appleSubscriptionStatus', 'appleProductId', 'appleEnvironment',
+          'appleAutoRenew', 'appleSignedDate', 'appleUpdatedAt',
           // Quota / reward fields (written only by API routes / Admin SDK)
           'nudgeCount', 'bonusNudgesEarned', 'scratchCardsAvailable',
           'streakFreezes', 'extraRelationExpiry', 'connectionCount',
-          'totalActivitiesCompleted', 'lastReEngagedAt', 'trialEndReminderSentAt'
+          'totalActivitiesCompleted', 'lastReEngagedAt', 'trialEndReminderSentAt',
+          'nudgeResetDate'
         ]);
 
       allow create: if request.auth != null
         && request.auth.uid == userId
+        && notDeleted()
+        && absentOrNull('extraRelationExpiry')
+        && absentOrZero('connectionCount')
+        && absentOrZero('totalActivitiesCompleted')
+        && absentOrNull('trialStartDate')
+        && absentOrNull('trialEndDate')
+        // nudgeResetDate may be set on create (nudgeCount starts at 0, so an old
+        // date only resets an empty count); updates to it are server-only.
+        && (!('nudgeResetDate' in request.resource.data) || request.resource.data.nudgeResetDate is string)
         && (!('plan' in request.resource.data) || request.resource.data.plan == 'free')
         && (!('trialUsed' in request.resource.data) || request.resource.data.trialUsed == false)
         && (!('nudgeCount' in request.resource.data) || request.resource.data.nudgeCount == 0)
@@ -29,24 +59,31 @@ service cloud.firestore {
         && (!('streakFreezes' in request.resource.data) || request.resource.data.streakFreezes == 0)
         && (!('lsCustomerId' in request.resource.data) || request.resource.data.lsCustomerId == null)
         && (!('lsSubscriptionId' in request.resource.data) || request.resource.data.lsSubscriptionId == null)
-        && (!('subscriptionStatus' in request.resource.data) || request.resource.data.subscriptionStatus == null);
+        && (!('subscriptionStatus' in request.resource.data) || request.resource.data.subscriptionStatus == null)
+        && !request.resource.data.keys().hasAny([
+          'billingSource', 'appleAccountToken', 'appleOriginalTransactionId', 'appleExpiresAt',
+          'appleSubscriptionStatus', 'appleProductId', 'appleEnvironment',
+          'appleAutoRenew', 'appleSignedDate', 'appleUpdatedAt'
+        ]);
     }
 
     match /user_connections/{docId} {
       allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid && notDeleted();
       allow update: if request.auth != null
         && resource.data.user_id == request.auth.uid
-        && request.resource.data.user_id == request.auth.uid;
+        && request.resource.data.user_id == request.auth.uid
+        && notDeleted();
       allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
 
     match /user_activities/{docId} {
       allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid && notDeleted();
       allow update: if request.auth != null
         && resource.data.user_id == request.auth.uid
-        && request.resource.data.user_id == request.auth.uid;
+        && request.resource.data.user_id == request.auth.uid
+        && notDeleted();
       allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
 
@@ -65,28 +102,31 @@ service cloud.firestore {
 
     match /blind_date_entries/{docId} {
       allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid && notDeleted();
       allow update: if request.auth != null
         && resource.data.user_id == request.auth.uid
-        && request.resource.data.user_id == request.auth.uid;
+        && request.resource.data.user_id == request.auth.uid
+        && notDeleted();
       allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
 
     match /watched_films/{docId} {
       allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid && notDeleted();
       allow update: if request.auth != null
         && resource.data.user_id == request.auth.uid
-        && request.resource.data.user_id == request.auth.uid;
+        && request.resource.data.user_id == request.auth.uid
+        && notDeleted();
       allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
 
     match /meal_plans/{docId} {
       allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid && notDeleted();
       allow update: if request.auth != null
         && resource.data.user_id == request.auth.uid
-        && request.resource.data.user_id == request.auth.uid;
+        && request.resource.data.user_id == request.auth.uid
+        && notDeleted();
       allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
     }
   }

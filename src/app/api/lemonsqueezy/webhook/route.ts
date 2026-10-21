@@ -4,11 +4,21 @@ import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin';
 import { sendAccountEmail } from '@/lib/loops-server';
 import type { LoopsTransactionalKey } from '@/lib/loops-transactional';
 import { SEND_LS_OVERLAP_EMAILS } from '@/lib/email-config';
+import { recomputePlan } from '@/lib/entitlements';
 
-// Lemon Squeezy statuses that mean the subscription is still active/accessible.
-// 'cancelled' = user cancelled but billing period hasn't ended yet — keep access.
-// 'past_due'  = payment failed, dunning in progress — keep access during retry window.
-const ACTIVE_STATUSES = new Set(['active', 'past_due', 'cancelled']);
+// Lemon Squeezy statuses after which the subscription won't bill again, so a
+// new subscription may replace it as the user's current one.
+const LS_REPLACEABLE_STATUSES = new Set(['expired', 'unpaid', 'cancelled']);
+
+// Events that change the stored subscription's status.
+const STATUS_EVENTS = new Set([
+  'subscription_updated',
+  'subscription_cancelled',
+  'subscription_resumed',
+  // Billing period has ended — status is 'expired', which revokes LS access.
+  'subscription_expired',
+  'subscription_payment_failed',
+]);
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -42,32 +52,85 @@ export async function POST(req: NextRequest) {
 
   if (!userId) return NextResponse.json({ ok: true });
 
+  // A deleted account (/api/account/delete cancels the LS subscription, which
+  // fires this webhook) must not be recreated or emailed.
+  try {
+    await getAdminAuth().getUser(userId);
+  } catch (err: any) {
+    if (err?.code === 'auth/user-not-found') return NextResponse.json({ ok: true });
+    throw err;
+  }
+
   const db = getAdminDb();
   const userRef = db.collection('users').doc(userId);
 
+  // Only the Lemon Squeezy fields are written here; the plan itself is derived by
+  // recomputePlan from both billing sources, so an LS event never downgrades a
+  // user who is also subscribed through Apple in-app purchase (and vice versa).
+  // Which LS statuses keep premium: see LS_ACTIVE_STATUSES in lib/entitlements.
+  //
+  // Each update runs in a transaction that checks the event belongs to the
+  // subscription stored on the user, so a late or retried event for an older
+  // subscription can't change the status of the current one.
+  let outcome: 'applied' | 'ignored' | 'missing' = 'ignored';
   if (eventName === 'subscription_created') {
-    await userRef.set(
-      { plan: 'premium', lsCustomerId: customerId, lsSubscriptionId: subscriptionId, subscriptionStatus: status },
-      { merge: true }
-    );
-  } else if (
-    eventName === 'subscription_updated' ||
-    eventName === 'subscription_cancelled' ||
-    eventName === 'subscription_resumed'
-  ) {
-    // 'cancelled' keeps plan='premium' — access continues until subscription_expired fires.
-    const isPremium = ACTIVE_STATUSES.has(status);
-    await userRef.set(
-      { plan: isPremium ? 'premium' : 'free', subscriptionStatus: status },
-      { merge: true }
-    );
-  } else if (eventName === 'subscription_expired') {
-    // Billing period has ended — revoke access now.
-    await userRef.set({ plan: 'free', subscriptionStatus: status }, { merge: true });
-  } else if (eventName === 'subscription_payment_failed') {
-    // Keep premium during the dunning retry window; LS will send subscription_expired if unresolvable.
-    await userRef.set({ subscriptionStatus: 'past_due' }, { merge: true });
+    outcome = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      const data = snap.data() ?? {};
+      const storedId = data.lsSubscriptionId != null ? String(data.lsSubscriptionId) : '';
+      const storedStatus = String(data.subscriptionStatus ?? '');
+      // Replace the stored subscription only when it won't bill again (or is the same one).
+      if (storedId && storedId !== subscriptionId && !LS_REPLACEABLE_STATUSES.has(storedStatus)) {
+        console.warn(
+          `webhook: ignoring subscription_created ${subscriptionId} for ${userId}; subscription ${storedId} is still ${storedStatus}`
+        );
+        return 'ignored' as const;
+      }
+      tx.set(
+        userRef,
+        { lsCustomerId: customerId, lsSubscriptionId: subscriptionId, subscriptionStatus: status || 'active' },
+        { merge: true }
+      );
+      return 'applied' as const;
+    });
+  } else if (STATUS_EVENTS.has(eventName)) {
+    // subscription_payment_failed's data is the invoice; its subscription is in attributes.
+    const eventSubscriptionId =
+      eventName === 'subscription_payment_failed'
+        ? String(payload.data?.attributes?.subscription_id ?? '')
+        : subscriptionId;
+    // 'cancelled' keeps premium — access continues until subscription_expired fires.
+    // Payment failures keep premium during the dunning retry window; LS sends
+    // subscription_expired if it can't be resolved.
+    const nextStatus =
+      eventName === 'subscription_expired'
+        ? status || 'expired'
+        : eventName === 'subscription_payment_failed'
+          ? 'past_due'
+          : status;
+    outcome = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      // Status changes only apply to an existing users doc, so a doc deleted
+      // mid-flight isn't recreated.
+      if (!snap.exists) return 'missing' as const;
+      const data = snap.data() ?? {};
+      const storedId = data.lsSubscriptionId != null ? String(data.lsSubscriptionId) : '';
+      if (storedId && storedId !== eventSubscriptionId) {
+        console.warn(
+          `webhook: ignoring ${eventName} for subscription ${eventSubscriptionId} of ${userId}; current subscription is ${storedId}`
+        );
+        return 'ignored' as const;
+      }
+      tx.update(userRef, { subscriptionStatus: nextStatus });
+      return 'applied' as const;
+    });
+  } else if (eventName === 'subscription_payment_recovered') {
+    // No status change of its own (subscription_updated carries it); just email.
+    outcome = 'applied';
   }
+
+  if (outcome !== 'applied') return NextResponse.json({ ok: true });
+  if (eventName !== 'subscription_payment_recovered') await recomputePlan(userId);
 
   await sendBillingEmail(eventName, userId, String(payload.data?.id ?? ''), payload.data?.attributes ?? {});
 

@@ -1,0 +1,43 @@
+{
+  "packageId": "online.tinynudge.app",
+  "host": "www.tinynudge.online",
+  "name": "TinyNudge",
+  "launcherName": "TinyNudge",
+  "display": "standalone",
+  "orientation": "portrait",
+  "themeColor": "#ec4899",
+  "themeColorDark": "#ec4899",
+  "navigationColor": "#fdf2f8",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#fdf2f8",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#fdf2f8",
+  "enableNotifications": true,
+  "startUrl": "/?source=twa",
+  "iconUrl": "https://www.tinynudge.online/icons/icon-512.png",
+  "maskableIconUrl": "https://www.tinynudge.online/icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "upload"
+  },
+  "appVersion": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://www.tinynudge.online/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://www.tinynudge.online/",
+  "minSdkVersion": 21,
+  "targetSdkVersion": 36,
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "fingerprints": []
+}

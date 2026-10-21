@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ec4899">
+  <title>TinyNudge</title>
+  <!--
+    Fallback entry page for the iOS app (Capacitor webDir). Normally never shown:
+    capacitor.config.ts sets server.url, so the app opens the live site directly.
+    If that setting is ever removed, this page sends the app to the site, or to
+    the bundled offline page when there is no connection.
+  -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #fdf2f8; }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #be185d;
+    }
+  </style>
+</head>
+<body>
+  <noscript>TinyNudge needs JavaScript. Open https://www.tinynudge.online</noscript>
+  <script>
+    (function () {
+      var SITE = 'https://www.tinynudge.online/';
+      if (navigator.onLine === false) {
+        window.location.replace('offline.html');
+        return;
+      }
+      window.location.replace(SITE);
+    })();
+  </script>
+</body>
+</html>

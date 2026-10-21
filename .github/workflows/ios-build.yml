@@ -1,0 +1,160 @@
+# Builds the TinyNudge iOS app (Capacitor 8) and uploads it to TestFlight.
+# No Mac needed: everything runs on a GitHub-hosted macOS runner.
+# First-time setup and the list of secrets: docs/IOS_BUILD.md
+name: iOS build (TestFlight)
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "What to run (register_app_id = one-time App ID + capabilities setup)"
+        type: choice
+        options:
+          - beta
+          - register_app_id
+        default: beta
+      marketing_version:
+        description: "App version shown in the App Store (e.g. 1.0.0)"
+        required: true
+        default: "1.0.0"
+      match_readonly:
+        description: "Only read existing signing certificates (turn on after the first successful run)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    # App Store uploads must be built with Xcode 26 / iOS 26 SDK (Apple requirement since 2026-04-28).
+    # Fallback if macos-26 is unavailable: macos-15 (only if it offers Xcode 26 — check runner-images).
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm packages
+        run: npm ci
+
+      - name: Set up Ruby + fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Register App ID and capabilities (optional one-time lane)
+        if: inputs.lane == 'register_app_id'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          FASTLANE_SKIP_UPDATE_CHECK: "true"
+        run: bundle exec fastlane ios register_app_id
+
+      - name: Check required secrets
+        if: inputs.lane == 'beta'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
+        run: |
+          missing=0
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID MATCH_GIT_URL MATCH_PASSWORD MATCH_GIT_BASIC_AUTHORIZATION GOOGLE_SERVICE_INFO_PLIST_BASE64; do
+            if [ -z "${!name}" ]; then echo "::error::GitHub secret $name is not set (see docs/IOS_BUILD.md)"; missing=1; fi
+          done
+          exit $missing
+
+      # ios/ is generated here (the owner has no Mac). Every customisation lives in
+      # capacitor.config.ts and fastlane/ so the project can be regenerated at any time.
+      # `cap add ios` defaults to Swift Package Manager in Capacitor 8 (no Podfile / pod install).
+      - name: Create iOS project (if not committed)
+        if: inputs.lane == 'beta'
+        run: |
+          if [ ! -d ios ]; then
+            npx cap add ios
+          else
+            echo "ios/ already exists, skipping cap add"
+          fi
+
+      - name: Sync Capacitor
+        if: inputs.lane == 'beta'
+        run: npx cap sync ios
+
+      - name: Write GoogleService-Info.plist
+        if: inputs.lane == 'beta'
+        env:
+          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
+        run: |
+          printf '%s' "$GOOGLE_SERVICE_INFO_PLIST_BASE64" | base64 --decode > ios/App/App/GoogleService-Info.plist
+          plutil -lint ios/App/App/GoogleService-Info.plist
+
+      # AppDelegate (push forwarding), Info.plist keys (Google URL scheme, background push,
+      # encryption export flag), entitlements (Push + Sign in with Apple), privacy manifest,
+      # app icon/splash, iPhone-only. In-App Purchase needs no entitlement.
+      - name: Prepare iOS project
+        if: inputs.lane == 'beta'
+        run: bash fastlane/scripts/prepare_ios.sh
+
+      - name: Cache Swift packages
+        if: inputs.lane == 'beta'
+        uses: actions/cache@v4
+        with:
+          path: build/ios/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'capacitor.config.ts') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build and upload to TestFlight
+        if: inputs.lane == 'beta'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          MATCH_READONLY: ${{ inputs.match_readonly }}
+          IOS_MARKETING_VERSION: ${{ inputs.marketing_version }}
+          FASTLANE_SKIP_UPDATE_CHECK: "true"
+          FASTLANE_HIDE_CHANGELOG: "true"
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
+        run: bundle exec fastlane ios beta
+
+      - name: Upload IPA
+        if: always() && inputs.lane == 'beta'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TinyNudge-ios-${{ github.run_number }}
+          path: |
+            build/ios/*.ipa
+            build/ios/*.dSYM.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs-${{ github.run_number }}
+          path: ~/Library/Logs/gym
+          if-no-files-found: ignore

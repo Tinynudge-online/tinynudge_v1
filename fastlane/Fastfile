@@ -1,0 +1,162 @@
+# TinyNudge iOS — build and upload to TestFlight from GitHub Actions (macOS runner).
+# Full setup guide: docs/IOS_BUILD.md
+#
+# Lanes:
+#   bundle exec fastlane ios beta              build + sign + upload to TestFlight
+#   bundle exec fastlane ios register_app_id   (optional) register online.tinynudge.app and
+#                                              enable Push / Sign in with Apple via the API
+#
+# Env (GitHub Actions secrets):
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8      App Store Connect API key (.p8 as text or base64)
+#   APPLE_TEAM_ID                              10-character Apple Developer Team ID
+#   MATCH_GIT_URL, MATCH_PASSWORD,
+#   MATCH_GIT_BASIC_AUTHORIZATION              fastlane match certificates repo
+# Optional env:
+#   MATCH_READONLY=true                        never create certificates/profiles (after first run)
+#   IOS_MARKETING_VERSION=1.0.0                version shown in the App Store
+
+default_platform(:ios)
+
+BUNDLE_ID = "online.tinynudge.app"
+
+def project_root
+  File.expand_path("..", FastlaneCore::FastlaneFolder.path)
+end
+
+def xcodeproj_path
+  File.join(project_root, "ios", "App", "App.xcodeproj")
+end
+
+def required_env(name)
+  value = ENV[name].to_s.strip
+  UI.user_error!("Missing environment variable #{name} (GitHub secret). See docs/IOS_BUILD.md.") if value.empty?
+  value
+end
+
+def asc_api_key
+  key = required_env("ASC_KEY_P8")
+  app_store_connect_api_key(
+    key_id: required_env("ASC_KEY_ID"),
+    issuer_id: required_env("ASC_ISSUER_ID"),
+    key_content: key,
+    # Accept either the raw .p8 text or its base64 encoding.
+    is_key_content_base64: !key.include?("BEGIN PRIVATE KEY"),
+    duration: 1200,
+    in_house: false
+  )
+end
+
+platform :ios do
+  desc "Build TinyNudge and upload it to TestFlight"
+  lane :beta do
+    UI.user_error!("#{xcodeproj_path} not found. Run `npx cap add ios` and fastlane/scripts/prepare_ios.sh first.") unless File.directory?(xcodeproj_path)
+
+    setup_ci # temporary keychain on CI runners
+    api_key = asc_api_key
+    team_id = required_env("APPLE_TEAM_ID")
+
+    # First run creates the Apple Distribution certificate + App Store profile
+    # and stores them (encrypted) in the match repo. Set MATCH_READONLY=true later.
+    match(
+      type: "appstore",
+      app_identifier: [BUNDLE_ID],
+      api_key: api_key,
+      team_id: team_id,
+      git_url: required_env("MATCH_GIT_URL"),
+      git_basic_authorization: ENV["MATCH_GIT_BASIC_AUTHORIZATION"],
+      readonly: ENV["MATCH_READONLY"].to_s.downcase == "true"
+    )
+    profile_name = ENV["sigh_#{BUNDLE_ID}_appstore_profile-name"]
+    UI.user_error!("match did not return a provisioning profile for #{BUNDLE_ID}") if profile_name.to_s.empty?
+
+    update_code_signing_settings(
+      path: xcodeproj_path,
+      use_automatic_signing: false,
+      team_id: team_id,
+      targets: ["App"],
+      build_configurations: ["Release"],
+      code_sign_identity: "Apple Distribution",
+      profile_name: profile_name,
+      bundle_identifier: BUNDLE_ID
+    )
+
+    # Build number = latest TestFlight build + 1 (never lower than the CI run number).
+    latest = begin
+      latest_testflight_build_number(api_key: api_key, app_identifier: BUNDLE_ID, initial_build_number: 0)
+    rescue StandardError => e
+      UI.important("Could not read the latest TestFlight build (#{e.message}); starting from 0")
+      0
+    end
+    build_number = [latest.to_i + 1, ENV["GITHUB_RUN_NUMBER"].to_i].max
+    marketing_version = ENV["IOS_MARKETING_VERSION"].to_s.strip
+    marketing_version = "1.0.0" if marketing_version.empty?
+
+    # The Capacitor project has no VERSIONING_SYSTEM, so agvtool-based actions
+    # (increment_build_number) don't work; set the build settings directly.
+    require "xcodeproj"
+    project = Xcodeproj::Project.open(xcodeproj_path)
+    project.targets.find { |t| t.name == "App" }.build_configurations.each do |config|
+      config.build_settings["CURRENT_PROJECT_VERSION"] = build_number.to_s
+      config.build_settings["MARKETING_VERSION"] = marketing_version
+    end
+    project.save
+    UI.message("Building TinyNudge #{marketing_version} (#{build_number})")
+
+    output_dir = File.join(project_root, "build", "ios")
+    build_app(
+      # Capacitor 8 = Swift Package Manager: build the .xcodeproj (no CocoaPods workspace).
+      project: xcodeproj_path,
+      scheme: "App",
+      configuration: "Release",
+      clean: true,
+      export_method: "app-store",
+      export_options: {
+        provisioningProfiles: { BUNDLE_ID => profile_name },
+        manageAppVersionAndBuildNumber: false
+      },
+      cloned_source_packages_path: File.join(output_dir, "SourcePackages"),
+      xcargs: "-skipPackagePluginValidation -skipMacroValidation",
+      output_directory: output_dir,
+      output_name: "TinyNudge.ipa"
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: BUNDLE_ID,
+      ipa: File.join(output_dir, "TinyNudge.ipa"),
+      skip_waiting_for_build_processing: true,
+      distribute_external: false
+    )
+  end
+
+  desc "Optional: register the App ID and enable Push Notifications + Sign in with Apple via the API"
+  lane :register_app_id do
+    asc_api_key # also sets the Spaceship API token
+
+    bundle_id = Spaceship::ConnectAPI::BundleId.find(BUNDLE_ID)
+    if bundle_id
+      UI.message("App ID #{BUNDLE_ID} already exists")
+    else
+      bundle_id = Spaceship::ConnectAPI::BundleId.create(
+        name: "TinyNudge",
+        platform: Spaceship::ConnectAPI::Platform::IOS,
+        bundle_id: BUNDLE_ID
+      )
+      UI.success("Registered App ID #{BUNDLE_ID}")
+    end
+
+    capabilities = [
+      ["PUSH_NOTIFICATIONS", []],
+      ["APPLE_ID_AUTH", [{ key: "APPLE_ID_AUTH_APP_CONSENT", options: [{ key: "PRIMARY_APP_CONSENT" }] }]],
+      ["IN_APP_PURCHASE", []]
+    ]
+    capabilities.each do |type, settings|
+      begin
+        bundle_id.update_capability(type, enabled: true, settings: settings)
+        UI.success("Enabled #{type}")
+      rescue StandardError => e
+        UI.important("Could not enable #{type} via the API (#{e.message}). Enable it by hand: developer.apple.com > Identifiers > #{BUNDLE_ID}.")
+      end
+    end
+  end
+end

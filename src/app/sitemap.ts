@@ -14,5 +14,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${APP_URL}/resources/blind-date`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
     { url: `${APP_URL}/resources/short-films`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
     { url: `${APP_URL}/resources/meal-planner`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
+    { url: `${APP_URL}/privacy`, lastModified: new Date(), changeFrequency: 'yearly', priority: 0.3 },
+    { url: `${APP_URL}/terms`, lastModified: new Date(), changeFrequency: 'yearly', priority: 0.3 },
+    { url: `${APP_URL}/support`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.4 },
+    { url: `${APP_URL}/delete-account`, lastModified: new Date(), changeFrequency: 'yearly', priority: 0.3 },
   ];
 }

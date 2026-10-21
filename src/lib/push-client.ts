@@ -1,4 +1,6 @@
 import { auth } from '@/app/firebase';
+import { SERVICE_WORKER_URL, VAPID_PUBLIC_KEY } from '@/lib/push-config';
+import { getAppContext } from '@/lib/app-context';
 
 async function getToken(): Promise<string | null> {
   try { return (await auth.currentUser?.getIdToken()) ?? null; } catch { return null; }
@@ -12,36 +14,131 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength);
 }
 
-/**
- * Register the service worker, request push permission, and send the
- * subscription to the backend so it's stored in Firestore.
- * Safe to call after every login — idempotent on the backend.
- */
-export async function registerPushNotifications(): Promise<void> {
-  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+function sameKey(a: ArrayBuffer | null | undefined, b: ArrayBuffer): boolean {
+  if (!a) return true; // browser doesn't expose the key — assume it matches
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
 
-  const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  if (!vapidPublicKey) return; // push not configured
+function hasServiceWorker(): boolean {
+  return typeof window !== 'undefined' && 'serviceWorker' in navigator;
+}
+
+/** True when this browser can receive Web Push (service worker + PushManager + Notification). */
+export function isWebPushSupported(): boolean {
+  return hasServiceWorker() && 'PushManager' in window && 'Notification' in window;
+}
+
+/**
+ * Register the service worker (offline page + push handling).
+ * Call on every page load — does NOT ask for notification permission.
+ */
+export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (!hasServiceWorker()) return null;
+  try {
+    return await navigator.serviceWorker.register(SERVICE_WORKER_URL);
+  } catch (err) {
+    console.error('[push-client] service worker registration failed:', err);
+    return null;
+  }
+}
+
+async function getRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (!hasServiceWorker()) return null;
+  const existing = await navigator.serviceWorker.getRegistration();
+  return existing ?? (await registerServiceWorker());
+}
+
+/** True if this device already has an active push subscription and permission is granted. */
+export async function isWebPushEnabled(): Promise<boolean> {
+  if (!isWebPushSupported() || Notification.permission !== 'granted') return false;
+  try {
+    const registration = await getRegistration();
+    return !!(await registration?.pushManager.getSubscription());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Request notification permission, subscribe this device to Web Push, and
+ * send the subscription to the backend (stored in Firestore).
+ * Must be called from an explicit user action (button tap).
+ * Idempotent on the backend. Resolves true when push is enabled.
+ */
+export async function enableWebPush(): Promise<boolean> {
+  if (!isWebPushSupported()) return false;
 
   try {
-    const registration = await navigator.serviceWorker.register('/sw.js');
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return;
+    const registration = await getRegistration();
+    if (!registration) return false;
 
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-    });
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return false;
+
+    const serverKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+    let subscription = await registration.pushManager.getSubscription();
+    // Drop a subscription made with a different (old) VAPID key — the server couldn't send to it
+    if (subscription && !sameKey(subscription.options.applicationServerKey, serverKey)) {
+      await subscription.unsubscribe().catch(() => {});
+      subscription = null;
+    }
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: serverKey,
+      });
+    }
 
     const token = await getToken();
-    if (!token) return;
+    if (!token) return false;
 
-    await fetch('/api/push/subscribe', {
+    const res = await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(subscription.toJSON()),
+      // context lets the server send TWA reminders a link that keeps the in-app context.
+      body: JSON.stringify({ ...subscription.toJSON(), context: getAppContext() }),
     });
+    return res.ok;
   } catch (err) {
-    console.error('[push-client] registration failed:', err);
+    console.error('[push-client] enabling push failed:', err);
+    return false;
   }
+}
+
+/**
+ * Remove this device's push subscription from the backend and the browser.
+ * Resolves true when the device is no longer subscribed.
+ */
+export async function disableWebPush(): Promise<boolean> {
+  if (!isWebPushSupported()) return true;
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return true;
+
+    const token = await getToken();
+    if (token) {
+      await fetch('/api/push/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ endpoint: subscription.endpoint }),
+      }).catch((err) => console.error('[push-client] backend unsubscribe failed:', err));
+    }
+
+    return await subscription.unsubscribe();
+  } catch (err) {
+    console.error('[push-client] disabling push failed:', err);
+    return false;
+  }
+}
+
+/**
+ * @deprecated Use enableWebPush() from an explicit button, and
+ * registerServiceWorker() on load. Kept for compatibility.
+ */
+export async function registerPushNotifications(): Promise<void> {
+  await enableWebPush();
 }
