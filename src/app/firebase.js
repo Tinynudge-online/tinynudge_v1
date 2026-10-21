@@ -6,7 +6,9 @@ import { Capacitor } from "@capacitor/core";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCdOs4Et9B--kZQLpbMaTKAgnsLrBlSBBo",
-  authDomain: "tinynudge-38b25.firebaseapp.com",
+  // Same site as the app, so redirect sign-in survives browser storage partitioning.
+  // Its /__/auth/handler must stay an authorized redirect URI on the Google OAuth client.
+  authDomain: "www.tinynudge.online",
   projectId: "tinynudge-38b25",
   storageBucket: "tinynudge-38b25.firebasestorage.app",
   messagingSenderId: "169555706895",
