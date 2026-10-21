@@ -53,6 +53,9 @@ elif command -v openssl >/dev/null 2>&1; then
   echo "keytool not found; generating keystore with openssl..."
   TMP_DIR="$(mktemp -d)"
   trap 'rm -rf "$TMP_DIR"' EXIT
+  # MSYS_NO_PATHCONV below also stops /tmp/... being translated for the Windows openssl;
+  # use a C:/... style path so it can open the files.
+  if command -v cygpath >/dev/null 2>&1; then TMP_DIR="$(cygpath -m "$TMP_DIR")"; fi
   # Git Bash rewrites arguments starting with "/" into Windows paths; this stops that for -subj.
   MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -sha256 -nodes \
     -keyout "$TMP_DIR/key.pem" -out "$TMP_DIR/cert.pem" \

@@ -2,6 +2,48 @@
 
 This guide explains how the iPhone app is built, and lists every one-time step and GitHub secret it needs. You don't need a Mac. The build runs on a GitHub-hosted macOS runner, and every setup step happens in a web browser on Windows.
 
+## Status checklist
+
+Everything that doesn't need an Apple Developer account is done. What's left is Apple-only.
+
+### ✅ Done (no Apple account needed)
+
+- [x] **Build pipeline:** `capacitor.config.ts`, `ios-shell/`, `fastlane/` and `.github/workflows/ios-build.yml` are in the repo.
+- [x] **The app compiles.** The unsigned simulator build (`.github/workflows/ios-simulator-build.yml`) passes: [run 39552058471](https://github.com/Tinynudge-online/tinynudge_v1/actions/runs/39552058471), `** BUILD SUCCEEDED **`, Xcode 26 on `macos-26`, all 8 Capacitor plugins resolved through Swift Package Manager. It runs again automatically whenever `fastlane/`, `capacitor.config.ts`, `ios-shell/`, `Gemfile` or `package*.json` change.
+- [x] **`prepare_ios.sh` and `configure_xcode_project.rb`** run cleanly on a freshly generated project:
+  - AppDelegate
+  - entitlements
+  - privacy manifest
+  - Google URL scheme
+  - icon and splash
+  - iPhone-only setting
+- [x] **The Fastfile is valid.** `bundle exec fastlane lanes` parses it and lists the `beta` and `register_app_id` lanes.
+- [x] **Privacy manifest** (`fastlane/native/PrivacyInfo.xcprivacy`) matches the App Privacy label in [APP_STORE_LISTING.md](APP_STORE_LISTING.md), section 5:
+  - Email and Name are used for App Functionality and for Developer's Advertising or Marketing (Loops emails).
+  - Product Interaction is declared.
+  - No tracking.
+- [x] **Step 4, signing-certificate repo:** private repo `Tinynudge-online/tinynudge-ios-certificates`, with secrets `MATCH_GIT_URL`, `MATCH_PASSWORD` and `MATCH_GIT_BASIC_AUTHORIZATION` set. The passphrase is in the owner's password manager.
+- [x] **Step 6, Firebase iOS app:** registered as **TinyNudge iOS**, App ID `1:169555706895:ios:aeee77dd29bf02193bcf7a`, bundle `online.tinynudge.app`. Its `GoogleService-Info.plist` includes `REVERSED_CLIENT_ID`, and the secret `GOOGLE_SERVICE_INFO_PLIST_BASE64` is set.
+
+### ⬜ Still to do (in order)
+
+| # | Task | Where | Produces |
+|---|---|---|---|
+| A | **Enroll in the Apple Developer Program** ($99/year). Choose Individual (fast) or Organization (needs a D-U-N-S number). | developer.apple.com/programs/enroll | Your Apple team |
+| B | Firebase → Authentication → Sign-in method → enable **Apple**. Native iOS sign-in needs no Services ID. *This step doesn't need the Apple account, so it can be done now.* | Firebase console | n/a |
+| C | Step 1: register the App ID `online.tinynudge.app` with Push Notifications and Sign in with Apple | developer.apple.com | n/a |
+| D | Step 2: create the app record in App Store Connect (SKU `tinynudge-ios`) | appstoreconnect.apple.com | App Store ID |
+| E | Step 3: create an App Store Connect API key (Admin) | App Store Connect → Users and Access → Integrations | secrets **`ASC_KEY_ID`**, **`ASC_ISSUER_ID`**, **`ASC_KEY_P8`** |
+| F | Step 5: copy your Team ID | developer.apple.com → Membership details | secret **`APPLE_TEAM_ID`** |
+| G | Step 6.2: on the Firebase iOS app, fill in the App Store ID (from D) and Team ID (from F) | Firebase → Project settings → TinyNudge iOS | n/a |
+| H | Step 7: create an APNs key and upload it to Firebase Cloud Messaging | developer.apple.com → Keys, then Firebase | push notifications work |
+| I | Step 8: create a Sign in with Apple key and enter it in Firebase's Apple provider | developer.apple.com → Keys, then Firebase | account deletion can revoke Apple tokens |
+| J | Step 9: accept the Paid Apps agreement, create subscription `online.tinynudge.premium.monthly`, set the Server Notifications URL | App Store Connect | in-app purchase works |
+| K | Run **Actions → iOS build (TestFlight)**: lane `beta`, `match_readonly` **off** the first time | GitHub | build in TestFlight |
+
+Set the secrets in PowerShell with `gh secret set NAME -R Tinynudge-online/tinynudge_v1`. It prompts for the value; paste it and press Enter. For the `.p8` file, run:
+`Get-Content "$HOME\Downloads\AuthKey_XXXX.p8" -Raw | gh secret set ASC_KEY_P8 -R Tinynudge-online/tinynudge_v1`.
+
 ## How it works
 
 | Piece | Where | What it does |
@@ -59,7 +101,7 @@ App Store Connect → **Users and Access** → **Integrations** → **App Store 
 - Download the `.p8` file. **You can only download it once.** Keep it in a password manager.
 - Write down the **Key ID** (shown in the table) and the **Issuer ID** (shown above the table).
 
-### 4. Private repository for signing certificates (fastlane match)
+### 4. Private repository for signing certificates (fastlane match): ✅ DONE
 
 1. On GitHub, create a new **private**, empty repository, for example `tinynudge-ios-certificates`. Don't add a README.
 2. Create a fine-grained personal access token at github.com → Settings → Developer settings → Fine-grained tokens:
@@ -78,7 +120,7 @@ On the first run, match uses the API key to create the **Apple Distribution cert
 
 developer.apple.com → **Account** → **Membership details** → **Team ID** (10 characters). This is `APPLE_TEAM_ID`.
 
-### 6. Firebase: iOS app and GoogleService-Info.plist
+### 6. Firebase: iOS app and GoogleService-Info.plist: ✅ registered, secret set (Apple provider and step 6.2 still to do)
 
 Firebase console → project **tinynudge-38b25**:
 1. **Authentication → Sign-in method**: make sure **Google** is enabled, then enable **Apple**. For native iOS sign-in, Apple needs no Services ID.

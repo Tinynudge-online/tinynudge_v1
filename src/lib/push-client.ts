@@ -55,7 +55,21 @@ export async function isWebPushEnabled(): Promise<boolean> {
   if (!isWebPushSupported() || Notification.permission !== 'granted') return false;
   try {
     const registration = await getRegistration();
-    return !!(await registration?.pushManager.getSubscription());
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return false;
+
+    // The browser may still hold a subscription saved under a previous account, so ask
+    // the backend whether the signed-in account has this device registered. If that check
+    // can't run (offline), trust the browser rather than show a misleading "off".
+    const token = await getToken();
+    if (!token) return true;
+    const res = await fetch('/api/push/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    }).catch(() => null);
+    if (!res?.ok) return true;
+    return (await res.json()).registered === true;
   } catch {
     return false;
   }

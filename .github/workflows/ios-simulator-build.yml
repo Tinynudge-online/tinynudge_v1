@@ -1,0 +1,135 @@
+# Compiles the TinyNudge iOS app for the iOS Simulator, unsigned. Needs NO Apple
+# Developer account or Apple secrets: it proves the generated Capacitor project,
+# the Swift packages, fastlane/native/* and prepare_ios.sh all build.
+# The signed TestFlight build is ios-build.yml (see docs/IOS_BUILD.md).
+name: iOS simulator build (no signing)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - capacitor.config.ts
+      - ios-shell/**
+      - fastlane/**
+      - Gemfile
+      - package.json
+      - package-lock.json
+      - .github/workflows/ios-simulator-build.yml
+  pull_request:
+    paths:
+      - capacitor.config.ts
+      - ios-shell/**
+      - fastlane/**
+      - Gemfile
+      - package.json
+      - package-lock.json
+      - .github/workflows/ios-simulator-build.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm packages
+        run: npm ci
+
+      - name: Set up Ruby + fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Validate Fastfile (parses and lists lanes)
+        env:
+          FASTLANE_SKIP_UPDATE_CHECK: "true"
+        run: bundle exec fastlane lanes
+
+      - name: Create iOS project
+        run: npx cap add ios
+
+      - name: Sync Capacitor
+        run: npx cap sync ios
+
+      # The real file when the secret is available; otherwise (e.g. pull requests from
+      # forks) a placeholder with the right shape, which is enough to compile.
+      - name: Write GoogleService-Info.plist
+        env:
+          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
+        run: |
+          out=ios/App/App/GoogleService-Info.plist
+          if [ -n "$GOOGLE_SERVICE_INFO_PLIST_BASE64" ]; then
+            printf '%s' "$GOOGLE_SERVICE_INFO_PLIST_BASE64" | base64 --decode > "$out"
+            echo "Using GoogleService-Info.plist from the secret"
+          else
+            echo "::warning::GOOGLE_SERVICE_INFO_PLIST_BASE64 not available; using a placeholder plist"
+            cat > "$out" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>BUNDLE_ID</key><string>online.tinynudge.app</string>
+            <key>CLIENT_ID</key><string>0-placeholder.apps.googleusercontent.com</string>
+            <key>REVERSED_CLIENT_ID</key><string>com.googleusercontent.apps.0-placeholder</string>
+            <key>API_KEY</key><string>placeholder</string>
+            <key>GCM_SENDER_ID</key><string>0</string>
+            <key>PROJECT_ID</key><string>placeholder</string>
+            <key>GOOGLE_APP_ID</key><string>1:0:ios:0</string>
+          </dict></plist>
+          EOF
+          fi
+          plutil -lint "$out"
+
+      - name: Prepare iOS project
+        run: bash fastlane/scripts/prepare_ios.sh
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: build/ios/SourcePackages
+          key: spm-sim-${{ runner.os }}-${{ hashFiles('package-lock.json', 'capacitor.config.ts') }}
+          restore-keys: spm-sim-${{ runner.os }}-
+
+      - name: Build for iOS Simulator (unsigned)
+        run: |
+          mkdir -p build/ios
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -clonedSourcePackagesDirPath build/ios/SourcePackages \
+            -derivedDataPath build/ios/DerivedData \
+            -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee build/ios/xcodebuild.log | grep -E '^(error|warning: .*deprecated)|error:|\*\* BUILD' || true
+          grep -q '\*\* BUILD SUCCEEDED \*\*' build/ios/xcodebuild.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-build-log-${{ github.run_number }}
+          path: build/ios/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14

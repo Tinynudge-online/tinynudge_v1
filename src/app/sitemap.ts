@@ -1,6 +1,6 @@
 import { MetadataRoute } from 'next';
 
-const APP_URL = 'https://tinynudge.online';
+const APP_URL = 'https://www.tinynudge.online';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

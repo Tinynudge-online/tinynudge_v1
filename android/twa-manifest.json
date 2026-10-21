@@ -35,7 +35,7 @@
   "isChromeOSOnly": false,
   "isMetaQuest": false,
   "fullScopeUrl": "https://www.tinynudge.online/",
-  "minSdkVersion": 21,
+  "minSdkVersion": 24,
   "targetSdkVersion": 36,
   "additionalTrustedOrigins": [],
   "retainedBundles": [],

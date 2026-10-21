@@ -4,7 +4,7 @@
     "target": {
       "namespace": "android_app",
       "package_name": "online.tinynudge.app",
-      "sha256_cert_fingerprints": []
+      "sha256_cert_fingerprints": ["86:EC:BE:36:C7:10:9D:AD:5A:15:B2:D2:49:5F:0C:EE:A8:D2:08:72:B2:34:CF:60:C0:4D:A7:CD:DB:03:36:F0"]
     }
   }
 ]

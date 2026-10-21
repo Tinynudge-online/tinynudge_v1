@@ -101,3 +101,17 @@ export async function reauthenticateCurrentUser(password?: string): Promise<{ ap
 export async function revokeAppleSignIn(authorizationCode: string): Promise<void> {
   await revokeAccessToken(auth, authorizationCode);
 }
+
+/**
+ * Sign out of the native Google / Apple session too (iOS app), so the next sign-in
+ * on a shared device doesn't silently reuse the previous account. No-op elsewhere.
+ */
+export async function nativeSignOut(): Promise<void> {
+  if (getAppContext() !== 'ios-app') return;
+  try {
+    const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+    await FirebaseAuthentication.signOut();
+  } catch (err) {
+    console.error('[native-auth] sign-out failed:', err);
+  }
+}
