@@ -35,7 +35,7 @@ Each nudge takes around 5 minutes. No prep, no performance — just a small mome
 
 Tonight, open the app and pick your first nudge. That's it. You're already halfway there.
 
-→ [Open TinyNudge](https://tinynudge.online)
+→ [Open TinyNudge](https://www.tinynudge.online)
 
 See you tonight,
 The TinyNudge team
@@ -71,7 +71,7 @@ Every nudge is tagged by how long it takes (5 min, 15 min, 30+) and whether you 
 
 The only rule: one tap, one moment, one day at a time.
 
-→ [Browse tonight's nudges](https://tinynudge.online)
+→ [Browse tonight's nudges](https://www.tinynudge.online)
 
 Rooting for you,
 The TinyNudge team
@@ -101,7 +101,7 @@ Five minutes of genuine presence beats two hours of distracted co-existence ever
 
 You're already building that habit. Keep going.
 
-→ [Tonight's nudge is waiting](https://tinynudge.online)
+→ [Tonight's nudge is waiting](https://www.tinynudge.online)
 
 Warmly,
 The TinyNudge team
@@ -131,7 +131,7 @@ You don't need to plan ahead. You don't need anything special. Just open the app
 
 {{childName}} will remember these moments long after you've forgotten the busy evenings. That's the thing about small — it compounds.
 
-→ [See tonight's nudge](https://tinynudge.online)
+→ [See tonight's nudge](https://www.tinynudge.online)
 
 You've got this,
 TinyNudge
@@ -168,7 +168,7 @@ That's not luck. That's a decision you've made {{currentStreak}} times — to sh
 
 Keep going. The streak is just a number — what it represents is everything.
 
-→ [Keep the streak alive](https://tinynudge.online)
+→ [Keep the streak alive](https://www.tinynudge.online)
 
 Proud of you,
 The TinyNudge team
@@ -202,7 +202,7 @@ Tonight could be that night.
 
 One nudge. Five minutes. That's all it takes to remember why you signed up in the first place.
 
-→ [Start again — pick tonight's nudge](https://tinynudge.online)
+→ [Start again — pick tonight's nudge](https://www.tinynudge.online)
 
 No pressure. Just here when you're ready.
 The TinyNudge team
@@ -239,7 +239,7 @@ The best way to use your trial: pick 2–3 nudges this week and actually do them
 
 Tonight's a great night to start.
 
-→ [Open TinyNudge — full access](https://tinynudge.online)
+→ [Open TinyNudge — full access](https://www.tinynudge.online)
 
 Enjoy every day of it,
 The TinyNudge team
@@ -272,7 +272,7 @@ A TinyNudge Premium subscription is **$2.99/month** — less than a coffee. And 
 
 If you've done even one nudge this week, you already know it's worth it.
 
-→ [Keep my full access — $2.99/mo](https://tinynudge.online)
+→ [Keep my full access — $2.99/mo](https://www.tinynudge.online)
 
 No pressure, but your streak is waiting.
 The TinyNudge team
@@ -302,7 +302,7 @@ Nothing you've done is lost. Your streak, your completed nudges and your first c
 
 If the last week helped you show up for {{childName}}, Premium keeps it all going for **$2.99/month**.
 
-→ [Go Premium](https://tinynudge.online)
+→ [Go Premium](https://www.tinynudge.online)
 
 Either way, keep going. One tap a day still counts.
 The TinyNudge team
@@ -336,7 +336,7 @@ Here's what's yours now:
 
 Your receipt comes separately from our payment partner, Lemon Squeezy. You can manage or cancel your subscription any time from the link in that receipt.
 
-→ [Open TinyNudge](https://tinynudge.online)
+→ [Open TinyNudge](https://www.tinynudge.online)
 
 With gratitude,
 The TinyNudge team
@@ -393,7 +393,7 @@ Hi {{firstName}},
 
 Good news: your payment went through and your TinyNudge Premium subscription is back on track. Nothing else to do.
 
-→ [Back to your nudges](https://tinynudge.online)
+→ [Back to your nudges](https://www.tinynudge.online)
 
 The TinyNudge team
 
@@ -447,7 +447,7 @@ Hi {{firstName}},
 
 Your TinyNudge Premium subscription is active again. Everything stays unlocked.
 
-→ [Pick tonight's nudge](https://tinynudge.online)
+→ [Pick tonight's nudge](https://www.tinynudge.online)
 
 Glad you're staying,
 The TinyNudge team
@@ -474,7 +474,7 @@ Your TinyNudge Premium access has now ended, and your account is on the free pla
 
 Your streak, your history and your connections are all still saved. You can keep using TinyNudge for free, or come back to Premium whenever it suits you.
 
-→ [Rejoin Premium](https://tinynudge.online)
+→ [Rejoin Premium](https://www.tinynudge.online)
 
 Thank you for being part of TinyNudge.
 The TinyNudge team
@@ -507,7 +507,7 @@ Here's your week:
 
 Every one of those was a moment {{childName}} got your full attention. And if last week got away from you, that's okay. This week is brand new, and one nudge tonight is a perfect restart.
 
-→ [Start this week's first nudge](https://tinynudge.online)
+→ [Start this week's first nudge](https://www.tinynudge.online)
 
 The TinyNudge team
 
@@ -534,7 +534,7 @@ This month you completed **{{completedThisPeriod}}** nudges. Your longest streak
 
 **One idea for this month:** pick a regular "nudge moment", like right after dinner or just before bedtime stories. Tying a nudge to something you already do is the easiest way to make it stick.
 
-→ [See this month's nudges](https://tinynudge.online)
+→ [See this month's nudges](https://www.tinynudge.online)
 
 Here's to another month of small moments,
 The TinyNudge team

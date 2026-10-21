@@ -5,7 +5,7 @@ export function HomeStructuredData() {
       {
         '@type': 'WebApplication',
         name: 'TinyNudge',
-        url: 'https://tinynudge.online',
+        url: 'https://www.tinynudge.online',
         description:
           'TinyNudge helps busy parents stay close to their young children through tiny daily activities. 50 expert-backed micro-moments, 5-minute connection rituals, streak tracking.',
         applicationCategory: 'LifestyleApplication',
@@ -41,8 +41,8 @@ export function HomeStructuredData() {
       {
         '@type': 'Organization',
         name: 'TinyNudge',
-        url: 'https://tinynudge.online',
-        logo: 'https://tinynudge.online/heart-favicon.svg',
+        url: 'https://www.tinynudge.online',
+        logo: 'https://www.tinynudge.online/heart-favicon.svg',
         contactPoint: {
           '@type': 'ContactPoint',
           email: 'tinynudge@gmail.com',

@@ -9,6 +9,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/api/', '/dashboard'],
       },
     ],
-    sitemap: 'https://tinynudge.online/sitemap.xml',
+    sitemap: 'https://www.tinynudge.online/sitemap.xml',
   };
 }

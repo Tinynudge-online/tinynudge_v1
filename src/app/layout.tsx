@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const APP_URL = "https://tinynudge.online";
+const APP_URL = "https://www.tinynudge.online";
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
