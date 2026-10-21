@@ -65,6 +65,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The default ("tools platform-tools") fails: Google no longer publishes the legacy "tools" package.
+          packages: platform-tools
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
