@@ -1,0 +1,16 @@
+# fastlane match keeps the App Store signing certificate and provisioning profile
+# encrypted (with MATCH_PASSWORD) in a separate PRIVATE git repository.
+# Authentication uses the App Store Connect API key (no Apple ID / 2FA needed),
+# loaded in the Fastfile with app_store_connect_api_key.
+#
+# Env (GitHub Actions secrets):
+#   MATCH_GIT_URL                   https URL of the private certificates repo
+#   MATCH_GIT_BASIC_AUTHORIZATION   base64 of "github-username:personal-access-token"
+#   MATCH_PASSWORD                  passphrase used to encrypt the repo contents
+git_url(ENV["MATCH_GIT_URL"])
+storage_mode("git")
+git_branch("main")
+
+type("appstore")
+app_identifier(["online.tinynudge.app"])
+team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"].to_s != ""

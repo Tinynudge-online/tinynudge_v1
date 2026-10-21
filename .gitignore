@@ -48,3 +48,6 @@ ui-debug.log
 
 # claude
 .claude/
+
+# Loops backups (local rollback copies made by scripts/loops)
+/scripts/loops/backups/

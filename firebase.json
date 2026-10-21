@@ -1,18 +1,34 @@
 {
   "hosting": {
     "source": ".",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": ["firebase.json", "**/.!(well-known)", "**/.!(well-known)/**", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Cache-Control", "value": "public, max-age=3600" }
+        ]
+      },
+      {
+        "source": "/sw.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" },
+          { "key": "Service-Worker-Allowed", "value": "/" }
+        ]
+      }
+    ],
     "frameworksBackend": {
       "region": "us-central1",
       "secrets": [
         "LEMONSQUEEZY_API_KEY",
+        "LEMONSQUEEZY_STORE_ID",
+        "LEMONSQUEEZY_VARIANT_ID",
         "LEMONSQUEEZY_WEBHOOK_SECRET",
-        "SERVICE_ACCOUNT_KEY"
-      ],
-      "environmentVariables": {
-        "LEMONSQUEEZY_STORE_ID": "204751",
-        "LEMONSQUEEZY_VARIANT_ID": "914209"
-      }
+        "SERVICE_ACCOUNT_KEY",
+        "LOOPS_API_KEY",
+        "CRON_SECRET"
+      ]
     }
   },
   "functions": {
@@ -21,5 +37,8 @@
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }

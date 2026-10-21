@@ -39,6 +39,7 @@ export const nudges: Nudge[] = [
       'When the timer goes off, don\'t rush away. Stay one extra second.',
     ],
     whyItWorks: 'Physical touch lowers cortisol in both parent and child within minutes. Two minutes of uninterrupted contact tells your child their nervous system is safe — and resets yours too.',
+    videoUrl: 'https://www.youtube.com/watch?v=NP2O4DQJFOM',
     relationshipTypes: ['son-under-10', 'daughter-under-10'],
   },
   {

@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      // All storage access goes through server-side Admin SDK.
+      // No direct client reads or writes are permitted.
+      allow read, write: if false;
+    }
+  }
+}

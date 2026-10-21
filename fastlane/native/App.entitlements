@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  TinyNudge iOS entitlements. Copied to ios/App/App/App.entitlements by
+  fastlane/scripts/prepare_ios.sh and wired up as CODE_SIGN_ENTITLEMENTS.
+
+  - aps-environment: Push Notifications (APNs, used by FCM).
+  - com.apple.developer.applesignin: Sign in with Apple.
+  - In-App Purchase needs no entitlement key on iOS (it is on for every App ID).
+
+  The App ID online.tinynudge.app must have "Push Notifications" and
+  "Sign in with Apple" enabled in the Apple Developer portal BEFORE fastlane match
+  creates the provisioning profile, otherwise the export fails with
+  "Provisioning profile doesn't include the ... entitlement". See docs/IOS_BUILD.md.
+-->
+<plist version="1.0">
+<dict>
+	<key>aps-environment</key>
+	<string>production</string>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>
